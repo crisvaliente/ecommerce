@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import SearchBar from '../ui/SearchBar';
+import SearchBar from './SearchBar';
 import { useRouter } from 'next/router';
 
 const Header: React.FC = () => {
