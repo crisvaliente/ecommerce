@@ -1,14 +1,28 @@
 import React from 'react';
 import Link from 'next/link';
+import SearchBar from '../ui/SearchBar';
+import { useRouter } from 'next/router';
 
 const Header: React.FC = () => {
+  const router = useRouter();
+
+  const handleSearch = (query: string) => {
+    if (query.trim()) {
+      router.push(`/busqueda?q=${encodeURIComponent(query)}`);
+    }
+  };
+
   return (
     <header className="bg-black text-white p-4">
-      <div className="container mx-auto flex justify-between items-center">
+      <div className="container mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
         <Link href="/" className="text-xl font-bold">
-        RÆYZ
-
+          RÆYZ
         </Link>
+
+        <div className="w-full md:w-1/3">
+          <SearchBar onSearch={handleSearch} placeholder="Buscar en la tienda..." />
+        </div>
+        
         <nav>
           <ul className="flex space-x-6">
             <li><Link href="/" className="hover:text-gray-300">Inicio</Link></li>
