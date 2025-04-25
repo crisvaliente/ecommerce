@@ -2,9 +2,12 @@ import React from 'react';
 import Link from 'next/link';
 import SearchBar from './SearchBar';
 import { useRouter } from 'next/router';
+import CartButton from '../ui/CartButton';
+import { useCart } from '../ui/CartContext';
 
 const Header: React.FC = () => {
   const router = useRouter();
+  const { itemCount } = useCart();
 
   const handleSearch = (query: string) => {
     if (query.trim()) {
@@ -29,6 +32,9 @@ const Header: React.FC = () => {
             <li><Link href="/coleccion" className="hover:text-gray-300">Colección</Link></li>
             <li><Link href="/nosotros" className="hover:text-gray-300">Nosotros</Link></li>
             <li><Link href="/contacto" className="hover:text-gray-300">Contacto</Link></li>
+            <li className="ml-2">
+              <CartButton itemCount={itemCount} />
+            </li>
           </ul>
         </nav>
       </div>
