@@ -118,7 +118,7 @@ const ShoppingCart: React.FC<ShoppingCartProps> = ({ isOpen, onClose }) => {
                 ) : cartItems.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-32 text-gray-500">
                     <FaShoppingCart size={40} className="mb-2" />
-                    <p>Your cart is empty</p>
+                    <p>El carrito esta vacío</p>
                   </div>
                 ) : (
                   <ul className="space-y-4">
@@ -179,13 +179,13 @@ const ShoppingCart: React.FC<ShoppingCartProps> = ({ isOpen, onClose }) => {
                       : 'bg-blue-600 hover:bg-blue-700 text-white'
                   }`}
                 >
-                  Proceed to Checkout
+                  Finalizar compra
                 </button>
                 <button
                   onClick={onClose}
                   className="w-full mt-2 py-2 px-4 rounded-md border border-gray-300 hover:bg-gray-100"
                 >
-                  Continue Shopping
+                  Continue comprando
                 </button>
               </div>
             </div>
