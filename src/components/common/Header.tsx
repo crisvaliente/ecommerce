@@ -1,5 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
+import NavLink from '../ui/NavLink'; // Importamos el NavLink
 import SearchBar from './SearchBar';
 import { useRouter } from 'next/router';
 import CartButton from '../ui/CartButton';
@@ -25,13 +26,13 @@ const Header: React.FC = () => {
           </Link>
         </div>
 
-        {/* Menú */}
+        {/* Menú con NavLink */}
         <nav className="flex-1">
           <ul className="flex justify-center space-x-8 text-lg">
-            <li><Link href="/" className="hover:text-gray-300">Inicio</Link></li>
-            <li><Link href="/coleccion" className="hover:text-gray-300">Colección</Link></li>
-            <li><Link href="/nosotros" className="hover:text-gray-300">Nosotros</Link></li>
-            <li><Link href="/contacto" className="hover:text-gray-300">Contacto</Link></li>
+            <li><NavLink href="/" >Inicio</NavLink></li>
+            <li><NavLink href="/coleccion" >Colección</NavLink></li>
+            <li><NavLink href="/nosotros" >Nosotros</NavLink></li>
+            <li><NavLink href="/contacto" >Contacto</NavLink></li>
           </ul>
         </nav>
 
