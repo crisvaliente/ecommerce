@@ -17,26 +17,29 @@ const Header: React.FC = () => {
 
   return (
     <header className="bg-black text-white p-4">
-      <div className="container mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-        <Link href="/" className="text-xl font-bold">
-          RÆYZ
-        </Link>
-
-        <div className="w-full md:w-1/3">
-          <SearchBar onSearch={handleSearch} placeholder="Buscar en la tienda..." />
+      <div className="container mx-auto flex items-center justify-between">
+        {/* Logo */}
+        <div className="flex-shrink-0">
+          <Link href="/" className="text-2xl font-bold">
+            RÆYZ
+          </Link>
         </div>
-        
-        <nav>
-          <ul className="flex space-x-6">
+
+        {/* Menú */}
+        <nav className="flex-1">
+          <ul className="flex justify-center space-x-8 text-lg">
             <li><Link href="/" className="hover:text-gray-300">Inicio</Link></li>
             <li><Link href="/coleccion" className="hover:text-gray-300">Colección</Link></li>
             <li><Link href="/nosotros" className="hover:text-gray-300">Nosotros</Link></li>
             <li><Link href="/contacto" className="hover:text-gray-300">Contacto</Link></li>
-            <li className="ml-2">
-              <CartButton itemCount={itemCount} />
-            </li>
           </ul>
         </nav>
+
+        {/* Search + Cart */}
+        <div className="flex items-center gap-4 flex-shrink-0">
+          <SearchBar onSearch={handleSearch} placeholder="Buscar..." />
+          <CartButton itemCount={itemCount} />
+        </div>
       </div>
     </header>
   );
