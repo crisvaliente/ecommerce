@@ -5,6 +5,7 @@ import Footer from '../components/common/Footer';
 import { CartProvider } from '../components/ui/CartContext';
 import '../styles/globals.css';
 
+
 function MyApp({ Component, pageProps }: AppProps) {
   return (
     <CartProvider>
