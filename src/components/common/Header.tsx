@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import NavLink from '../ui/NavLink'; // Importamos el NavLink
 import SearchBar from './SearchBar';
@@ -9,6 +9,7 @@ import { useCart } from '../ui/CartContext';
 const Header: React.FC = () => {
   const router = useRouter();
   const { itemCount } = useCart();
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const handleSearch = (query: string) => {
     if (query.trim()) {
@@ -16,9 +17,13 @@ const Header: React.FC = () => {
     }
   };
 
+  const toggleMenu = () => {
+    setMenuOpen(!menuOpen);
+  };
+
   return (
     <header className="bg-black text-white p-4">
-      <div className="container mx-auto flex items-center justify-between">
+      <div className="container mx-auto flex flex-wrap items-center justify-between">
         {/* Logo */}
         <div className="flex-shrink-0">
           <Link href="/" className="text-2xl font-bold">
@@ -26,9 +31,34 @@ const Header: React.FC = () => {
           </Link>
         </div>
 
+        {/* Hamburger menu button for small screens */}
+        <button
+          className="block md:hidden text-white focus:outline-none"
+          onClick={toggleMenu}
+          aria-label="Toggle menu"
+        >
+          <svg
+            className="h-6 w-6 fill-current"
+            viewBox="0 0 24 24"
+          >
+            {menuOpen ? (
+              <path
+                fillRule="evenodd"
+                clipRule="evenodd"
+                d="M18.364 5.636a1 1 0 00-1.414-1.414L12 9.172 7.05 4.222a1 1 0 10-1.414 1.414L10.828 12l-5.192 5.192a1 1 0 101.414 1.414L12 14.828l4.95 4.95a1 1 0 001.414-1.414L13.172 12l5.192-5.192z"
+              />
+            ) : (
+              <path
+                fillRule="evenodd"
+                d="M4 5h16v2H4V5zm0 6h16v2H4v-2zm0 6h16v2H4v-2z"
+              />
+            )}
+          </svg>
+        </button>
+
         {/* Menú con NavLink */}
-        <nav className="flex-1">
-          <ul className="flex justify-center space-x-8 text-lg">
+        <nav className={`w-full md:flex md:items-center md:w-auto ${menuOpen ? 'block' : 'hidden'} md:block`}>
+          <ul className="flex flex-col md:flex-row md:justify-center md:space-x-8 text-lg">
             <li><NavLink href="/" >Inicio</NavLink></li>
             <li><NavLink href="/coleccion" >Colección</NavLink></li>
             <li><NavLink href="/nosotros" >Nosotros</NavLink></li>
@@ -37,7 +67,7 @@ const Header: React.FC = () => {
         </nav>
 
         {/* Search + Cart */}
-        <div className="flex items-center gap-4 flex-shrink-0">
+        <div className="flex items-center gap-4 flex-shrink-0 mt-4 md:mt-0 w-full md:w-auto">
           <SearchBar onSearch={handleSearch} placeholder="Buscar..." />
           <CartButton itemCount={itemCount} />
         </div>
