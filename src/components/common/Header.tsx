@@ -5,11 +5,20 @@ import SearchBar from './SearchBar';
 import { useRouter } from 'next/router';
 import CartButton from '../ui/CartButton';
 import { useCart } from '../ui/CartContext';
+import LoginMenu from './LoginMenu';
+import { useAuth } from '../../context/AuthContext';
 
 const Header: React.FC = () => {
   const router = useRouter();
   const { itemCount } = useCart();
   const [menuOpen, setMenuOpen] = useState(false);
+
+  const { user, signOut } = useAuth();
+
+  const handleLogout = async () => {
+    await signOut();
+    router.push('/');
+  };
 
   const handleSearch = (query: string) => {
     if (query.trim()) {
@@ -66,11 +75,24 @@ const Header: React.FC = () => {
           </ul>
         </nav>
 
-        {/* Search + Cart */}
-        <div className="flex items-center gap-4 flex-shrink-0 mt-4 md:mt-0 w-full md:w-auto">
-          <SearchBar onSearch={handleSearch} placeholder="Buscar..." />
-          <CartButton itemCount={itemCount} />
-        </div>
+          {/* Search + Cart */}
+          <div className="flex items-center gap-4 flex-shrink-0 mt-4 md:mt-0 w-full md:w-auto">
+            <SearchBar onSearch={handleSearch} placeholder="Buscar..." />
+            {user ? (
+              <div className="flex items-center space-x-4 text-white">
+                <span>Hola, {user.email}</span>
+                <button
+                  onClick={handleLogout}
+                  className="bg-red-600 px-3 py-1 rounded hover:bg-red-700"
+                >
+                  Cerrar sesión
+                </button>
+              </div>
+            ) : (
+              <LoginMenu />
+            )}
+            <CartButton itemCount={itemCount} />
+          </div>
       </div>
     </header>
   );
