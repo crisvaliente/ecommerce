@@ -11,6 +11,11 @@ export default {
       colors: {
         background: "var(--background)",
         foreground: "var(--foreground)",
+        primary: "var(--primary)",
+      },
+      fontFamily: {
+        raleway: ['Raleway', 'sans-serif'],
+        inter: ['Inter', 'sans-serif'],
       },
     },
   },

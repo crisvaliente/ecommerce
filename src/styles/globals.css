@@ -1,13 +1,17 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Raleway:wght@500;700;900&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #000000;
+  --background: #EEECE1;
+  --foreground: #0D0D0E;
+  --primary: #E30B13;
 }
 
 body {
   background-color: var(--background);
   color: var(--foreground);
+  font-family: 'Inter', sans-serif;
 }

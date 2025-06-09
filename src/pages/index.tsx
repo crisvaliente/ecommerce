@@ -11,7 +11,7 @@ const Home: React.FC = () => {
       {/* Después vendrían las demás secciones de tu página de inicio */}
       <section className="py-16 px-4">
         <div className="container mx-auto">
-          <h2 className="text-3xl font-bold mb-10 text-center">Productos Destacados</h2>
+          <h2 className="text-3xl font-bold mb-10 text-center font-raleway">Productos Destacados</h2>
           {/* Contenido de productos destacados... */}
         </div>
       </section>

@@ -31,12 +31,12 @@ const Header: React.FC = () => {
   };
 
   return (
-    <header className="bg-black text-white p-4">
+    <header className="bg-background text-foreground p-4 font-raleway">
       <div className="container mx-auto flex flex-wrap items-center justify-between">
         {/* Logo */}
-        <div className="flex-shrink-0">
-          <Link href="/" className="text-2xl font-bold">
-            RÆYZ
+        <div className="flex-shrink-0 bg-background p-1 rounded">
+          <Link href="/">
+            <img src="/images/logo.PNG" alt="Logo RÆYZ" className="h-10 w-auto" />
           </Link>
         </div>
 
