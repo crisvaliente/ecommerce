@@ -16,7 +16,7 @@ const RayzSection: React.FC<RayzSectionProps> = ({
   subtitle = "Conectá con tu estilo. Handmade & único como vos.",
   buttonText = "Ver colección",
   buttonLink = "/coleccion",
-  backgroundImage = "/images/logo.PNG"
+  backgroundImage = "/images/obra.png"
 }) => {
   return (
     <section className="relative h-[80vh] flex items-center justify-center text-white bg-black overflow-hidden">
@@ -24,7 +24,7 @@ const RayzSection: React.FC<RayzSectionProps> = ({
         src={backgroundImage}
         alt="Rayz Hero"
         fill
-        className="object-cover opacity-50"
+        className="object-contain object-center opacity-100"
         priority
       />
       
