@@ -94,3 +94,173 @@ CREATE POLICY "usuario_agrega_producto_a_carrito"
   FOR INSERT
   TO authenticated
   WITH CHECK (carrito_id IN (SELECT id FROM Carrito WHERE usuario_id = auth.uid()));
+-- Activar RLS en las tablas clave
+ALTER TABLE Usuario ENABLE ROW LEVEL SECURITY;
+ALTER TABLE Producto ENABLE ROW LEVEL SECURITY;
+ALTER TABLE Categoria ENABLE ROW LEVEL SECURITY;
+ALTER TABLE Pedido ENABLE ROW LEVEL SECURITY;
+ALTER TABLE Carrito ENABLE ROW LEVEL SECURITY;
+ALTER TABLE Favorito ENABLE ROW LEVEL SECURITY;
+ALTER TABLE Direccion_Usuario ENABLE ROW LEVEL SECURITY;
+
+-- ------------------------------
+-- POLÍTICAS PARA LA TABLA USUARIO
+-- ------------------------------
+
+-- Permitir que un usuario lea su propia info
+CREATE POLICY "read_own_user"
+  ON Usuario
+  FOR SELECT
+  TO authenticated
+  USING (id = auth.uid());
+
+-- Permitir que un usuario actualice su propia info
+CREATE POLICY "update_own_user"
+  ON Usuario
+  FOR UPDATE
+  TO authenticated
+  USING (id = auth.uid());
+
+-- Permitir a admins ver todos los usuarios de su empresa
+CREATE POLICY "admin_read_users_in_company"
+  ON Usuario
+  FOR SELECT
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM Usuario u
+      WHERE u.id = auth.uid()
+      AND u.rol = 'admin'
+      AND u.empresa_id = Usuario.empresa_id
+    )
+  );
+
+-- ------------------------------
+-- POLÍTICAS PARA PRODUCTO
+-- ------------------------------
+
+-- Leer productos de la misma empresa
+CREATE POLICY "read_productos_empresa"
+  ON Producto
+  FOR SELECT
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM Usuario u
+      WHERE u.id = auth.uid()
+      AND u.empresa_id = Producto.empresa_id
+    )
+  );
+
+-- Insertar productos si es admin o vendedor
+CREATE POLICY "insert_productos_empresa"
+  ON Producto
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM Usuario u
+      WHERE u.id = auth.uid()
+      AND u.empresa_id = Producto.empresa_id
+      AND u.rol IN ('admin', 'vendedor')
+    )
+  );
+
+-- Editar productos si es admin
+CREATE POLICY "update_productos_admin"
+  ON Producto
+  FOR UPDATE
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM Usuario u
+      WHERE u.id = auth.uid()
+      AND u.empresa_id = Producto.empresa_id
+      AND u.rol = 'admin'
+    )
+  );
+
+-- ------------------------------
+-- POLÍTICAS PARA PEDIDO
+-- ------------------------------
+
+-- Leer pedidos propios
+CREATE POLICY "read_own_pedidos"
+  ON Pedido
+  FOR SELECT
+  TO authenticated
+  USING (usuario_id = auth.uid());
+
+-- Insertar pedidos propios
+CREATE POLICY "insert_own_pedidos"
+  ON Pedido
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (usuario_id = auth.uid());
+
+-- ------------------------------
+-- POLÍTICAS PARA CARRITO
+-- ------------------------------
+
+-- Leer carrito propio
+CREATE POLICY "read_own_carrito"
+  ON Carrito
+  FOR SELECT
+  TO authenticated
+  USING (usuario_id = auth.uid());
+
+-- Insertar carrito propio
+CREATE POLICY "insert_own_carrito"
+  ON Carrito
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (usuario_id = auth.uid());
+
+-- ------------------------------
+-- POLÍTICAS PARA FAVORITOS
+-- ------------------------------
+
+-- Leer favoritos propios
+CREATE POLICY "read_own_favoritos"
+  ON Favorito
+  FOR SELECT
+  TO authenticated
+  USING (usuario_id = auth.uid());
+
+-- Insertar favoritos propios
+CREATE POLICY "insert_own_favoritos"
+  ON Favorito
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (usuario_id = auth.uid());
+
+-- ------------------------------
+-- POLÍTICAS PARA CATEGORIA
+-- ------------------------------
+
+-- Leer categorías de la empresa
+CREATE POLICY "read_categoria_empresa"
+  ON Categoria
+  FOR SELECT
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM Usuario u
+      WHERE u.id = auth.uid()
+      AND u.empresa_id = Categoria.empresa_id
+    )
+  );
+
+-- Insertar si es admin o vendedor
+CREATE POLICY "insert_categoria_empresa"
+  ON Categoria
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM Usuario u
+      WHERE u.id = auth.uid()
+      AND u.empresa_id = Categoria.empresa_id
+      AND u.rol IN ('admin', 'vendedor')
+    )
+  );

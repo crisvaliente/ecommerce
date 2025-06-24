@@ -1,14 +1,24 @@
 -- Crear extensiones necesarias para UUID
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- Crear tabla de Empresas
+CREATE TABLE Empresa (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    nombre VARCHAR(255) NOT NULL,
+    descripcion TEXT,
+    fecha_creacion TIMESTAMP DEFAULT NOW()
+);
+
 -- Crear tabla de Usuarios
 CREATE TABLE Usuario (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     nombre VARCHAR(255) NOT NULL,
     correo VARCHAR(255) UNIQUE NOT NULL,
-    contrasena VARCHAR(255) NOT NULL,
+    contrasena VARCHAR(255),
     telefono VARCHAR(15),
     direccion VARCHAR(255),
+    rol VARCHAR(50) DEFAULT 'cliente', -- 'admin', 'vendedor', 'cliente'
+    empresa_id UUID REFERENCES Empresa(id) ON DELETE CASCADE,
     fecha_registro TIMESTAMP DEFAULT NOW()
 );
 
@@ -28,7 +38,8 @@ CREATE TABLE Direccion_Usuario (
 CREATE TABLE Categoria (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     nombre VARCHAR(255) NOT NULL,
-    descripcion TEXT
+    descripcion TEXT,
+    empresa_id UUID REFERENCES Empresa(id) ON DELETE CASCADE
 );
 
 -- Crear tabla de Productos
@@ -40,6 +51,7 @@ CREATE TABLE Producto (
     stock INT NOT NULL,
     tipo VARCHAR(50), -- prenda/outfit
     categoria_id UUID REFERENCES Categoria(id) ON DELETE SET NULL,
+    empresa_id UUID REFERENCES Empresa(id) ON DELETE CASCADE,
     creado_en TIMESTAMP DEFAULT NOW()
 );
 
@@ -126,3 +138,4 @@ CREATE TABLE Historial_Stock (
     fecha TIMESTAMP DEFAULT NOW(),
     motivo TEXT
 );
+
