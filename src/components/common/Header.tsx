@@ -7,13 +7,14 @@ import CartButton from '../ui/CartButton';
 import { useCart } from '../ui/CartContext';
 import LoginMenu from './LoginMenu';
 import { useAuth } from '../../context/AuthContext';
+import Image from 'next/image';
 
 const Header: React.FC = () => {
   const router = useRouter();
   const { itemCount } = useCart();
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const { user, signOut } = useAuth();
+  const { sessionUser, signOut } = useAuth();
 
   const handleLogout = async () => {
     await signOut();
@@ -36,7 +37,7 @@ const Header: React.FC = () => {
         {/* Logo */}
         <div className="flex-shrink-0 bg-background p-1 rounded">
           <Link href="/">
-            <img src="/images/logo.PNG" alt="Logo RÆYZ" className="h-10 w-auto" />
+            <Image src="/images/logo.PNG" alt="Logo RÆYZ" width={40} height={40} className="h-10 w-auto" />
           </Link>
         </div>
 
@@ -78,9 +79,9 @@ const Header: React.FC = () => {
           {/* Search + Cart */}
           <div className="flex items-center gap-4 flex-shrink-0 mt-4 md:mt-0 w-full md:w-auto">
             <SearchBar onSearch={handleSearch} placeholder="Buscar..." />
-            {user ? (
+            {sessionUser ? (
               <div className="flex items-center space-x-4 text-white">
-                <span>Hola, {user.email}</span>
+                <span>Hola, {sessionUser.email}</span>
                 <button
                   onClick={handleLogout}
                   className="bg-red-600 px-3 py-1 rounded hover:bg-red-700"

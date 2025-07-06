@@ -13,7 +13,7 @@ export const useGoogleLoginHandler = () => {
       return;
     }
 
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('usuario')
       .select('*')
       .eq('correo', user.email)

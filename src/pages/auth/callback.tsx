@@ -6,7 +6,7 @@ export default function Callback() {
 
   useEffect(() => {
     handleGoogleLoginRedirect();
-  }, []);
+  }, [handleGoogleLoginRedirect]);
 
   return <p className="text-center mt-10">Cargando...</p>;
 }
