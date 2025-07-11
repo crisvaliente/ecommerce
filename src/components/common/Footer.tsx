@@ -1,5 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 
 const Footer: React.FC = () => {
   return (
@@ -7,7 +8,7 @@ const Footer: React.FC = () => {
       <div className="container mx-auto grid grid-cols-1 md:grid-cols-3 gap-8">
         <div>
           <h3 className="text-xl font-bold mb-4 text-primary">
-            <img src="/images/logo.PNG" alt="Logo RÆYZ" className="h-10 w-auto" />
+            <Image src="/images/logo.PNG" alt="Logo RÆYZ" width={40} height={40} className="h-10 w-auto" />
           </h3>
           <p>Handmade & único como vos.</p>
         </div>

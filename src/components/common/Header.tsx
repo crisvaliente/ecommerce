@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import NavLink from '../ui/NavLink'; // Importamos el NavLink
 import SearchBar from './SearchBar';
@@ -7,13 +7,16 @@ import CartButton from '../ui/CartButton';
 import { useCart } from '../ui/CartContext';
 import LoginMenu from './LoginMenu';
 import { useAuth } from '../../context/AuthContext';
+import Image from 'next/image';
 
 const Header: React.FC = () => {
   const router = useRouter();
   const { itemCount } = useCart();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
 
-  const { user, signOut } = useAuth();
+  const { sessionUser, dbUser, signOut } = useAuth();
 
   const handleLogout = async () => {
     await signOut();
@@ -30,13 +33,30 @@ const Header: React.FC = () => {
     setMenuOpen(!menuOpen);
   };
 
+  const toggleUserMenu = () => {
+    setUserMenuOpen(!userMenuOpen);
+  };
+
+  // Cerrar menú usuario al hacer clic fuera
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
   return (
     <header className="bg-background text-foreground p-4 font-raleway">
       <div className="container mx-auto flex flex-wrap items-center justify-between">
         {/* Logo */}
         <div className="flex-shrink-0 bg-background p-1 rounded">
           <Link href="/">
-            <img src="/images/logo.PNG" alt="Logo RÆYZ" className="h-10 w-auto" />
+            <Image src="/images/logo.PNG" alt="Logo RÆYZ" width={40} height={40} className="h-10 w-auto" />
           </Link>
         </div>
 
@@ -75,24 +95,63 @@ const Header: React.FC = () => {
           </ul>
         </nav>
 
-          {/* Search + Cart */}
-          <div className="flex items-center gap-4 flex-shrink-0 mt-4 md:mt-0 w-full md:w-auto">
-            <SearchBar onSearch={handleSearch} placeholder="Buscar..." />
-            {user ? (
-              <div className="flex items-center space-x-4 text-white">
-                <span>Hola, {user.email}</span>
-                <button
-                  onClick={handleLogout}
-                  className="bg-red-600 px-3 py-1 rounded hover:bg-red-700"
+        {/* Search + Cart + User Menu */}
+        <div className="flex items-center gap-4 flex-shrink-0 mt-4 md:mt-0 w-full md:w-auto">
+          <SearchBar onSearch={handleSearch} placeholder="Buscar..." />
+          {sessionUser ? (
+            <div className="relative" ref={userMenuRef}>
+              <button
+                onClick={toggleUserMenu}
+                className="flex items-center space-x-2 text-white hover:underline focus:outline-none"
+                aria-haspopup="true"
+                aria-expanded={userMenuOpen}
+              >
+                <span>{dbUser?.nombre || sessionUser.email}</span>
+                <svg
+                  className={`w-4 h-4 transition-transform duration-200 ${userMenuOpen ? 'transform rotate-180' : ''}`}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  viewBox="0 0 24 24"
+                  xmlns="http://www.w3.org/2000/svg"
                 >
-                  Cerrar sesión
-                </button>
-              </div>
-            ) : (
-              <LoginMenu />
-            )}
-            <CartButton itemCount={itemCount} />
-          </div>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7"></path>
+                </svg>
+              </button>
+              {userMenuOpen && (
+                <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-50 text-gray-800">
+                  <Link href="/mis-ordenes" className="block px-4 py-2 hover:bg-gray-100 cursor-pointer">
+                    Mis órdenes
+                  </Link>
+                  <Link href="/mi-cuenta" className="block px-4 py-2 hover:bg-gray-100 cursor-pointer">
+                    Mi cuenta
+                  </Link>
+                  <Link href="/mi-billetera" className="block px-4 py-2 hover:bg-gray-100 cursor-pointer">
+                    Mi Billetera
+                  </Link>
+                  <Link href="/rastrear-pedido" className="block px-4 py-2 hover:bg-gray-100 cursor-pointer">
+                    Rastrear pedido
+                  </Link>
+                  <Link href="/sorteo-mensual" className="block px-4 py-2 hover:bg-gray-100 cursor-pointer">
+                    Sorteo mensual
+                  </Link>
+                  <Link href="/devoluciones" className="block px-4 py-2 hover:bg-gray-100 cursor-pointer">
+                    Devoluciones
+                  </Link>
+                  <button
+                    onClick={handleLogout}
+                    className="w-full text-left px-4 py-2 hover:bg-gray-100 cursor-pointer"
+                  >
+                    Salir
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <LoginMenu />
+          )}
+          <CartButton itemCount={itemCount} />
+        </div>
       </div>
     </header>
   );
