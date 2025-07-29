@@ -92,6 +92,27 @@ const Header: React.FC = () => {
             <li><NavLink href="/coleccion" >Colección</NavLink></li>
             <li><NavLink href="/nosotros" >Nosotros</NavLink></li>
             <li><NavLink href="/contacto" >Contacto</NavLink></li>
+            {dbUser?.rol === 'admin' && (
+              <>
+                <li><NavLink href="/dashboard/usuarios">Gestión Usuarios</NavLink></li>
+                <li><NavLink href="/dashboard/productos">Gestión Productos</NavLink></li>
+                <li><NavLink href="/dashboard/reportes">Reportes</NavLink></li>
+              </>
+            )}
+            {dbUser?.rol === 'dueña' && (
+              <>
+                <li><NavLink href="/dashboard/ventas">Dashboard Ventas</NavLink></li>
+                <li><NavLink href="/dashboard/productos">Gestión Productos</NavLink></li>
+                <li><NavLink href="/dashboard/reportes">Reportes</NavLink></li>
+              </>
+            )}
+            {dbUser?.rol === 'usuario' && (
+              <>
+                <li><NavLink href="/coleccion">Catálogo</NavLink></li>
+                <li><NavLink href="/mis-ordenes">Mis Órdenes</NavLink></li>
+                <li><NavLink href="/mi-cuenta">Mi Cuenta</NavLink></li>
+              </>
+            )}
           </ul>
         </nav>
 
