@@ -1,3 +1,4 @@
+// /src/pages/auth/callback.tsx
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { supabase } from "../../lib/supabaseClient";
@@ -11,28 +12,46 @@ export default function Callback() {
       try {
         const url = new URL(window.location.href);
         const err = url.searchParams.get("error_description");
+
         if (err) {
           setMsg(`Error: ${err}`);
-          await router.replace("/auth/login?error=" + encodeURIComponent(err));
+          await router.replace(
+            "/auth/login?error=" + encodeURIComponent(err)
+          );
           return;
         }
 
         // Intercambia el code por la sesión (PASO CLAVE)
-        const { error } = await supabase.auth.exchangeCodeForSession(window.location.href);
+        const { error } = await supabase.auth.exchangeCodeForSession(
+          window.location.href
+        );
+
         if (error) {
           setMsg(`No se pudo finalizar el login: ${error.message}`);
-          await router.replace("/auth/login?error=" + encodeURIComponent(error.message));
+          await router.replace(
+            "/auth/login?error=" + encodeURIComponent(error.message)
+          );
           return;
         }
 
-        // Sesión OK → a tu página de pruebas / dashboard
+        // ✅ Sesión OK → redirigir a tu página de pruebas / dashboard
         await router.replace("/debug/auth");
-      } catch (e: any) {
-        setMsg(e?.message ?? "Error inesperado");
-        await router.replace("/auth/login?error=" + encodeURIComponent(e?.message ?? "unknown"));
+      } catch (e) {
+        // Tipado defensivo: `unknown` en lugar de `any`
+        const err =
+          e instanceof Error
+            ? e.message
+            : typeof e === "string"
+            ? e
+            : "Error inesperado";
+        setMsg(err);
+        await router.replace(
+          "/auth/login?error=" + encodeURIComponent(err)
+        );
       }
     };
-    run();
+
+    void run();
   }, [router]);
 
   return <p style={{ textAlign: "center", marginTop: 40 }}>{msg}</p>;
