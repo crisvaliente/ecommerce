@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabaseClient";
 
@@ -27,10 +26,10 @@ export default function DebugDeployPage() {
         newResults.push({ ...result, time: Math.round(end - start) });
       };
 
-      // 🔹 1. Test de conexión Supabase
+      // 🔹 1. Test de conexión Supabase (sin 'data' para evitar no-unused-vars)
       await test("Conexión a Supabase", async () => {
         try {
-          const { data, error } = await supabase.from("usuario").select("id").limit(1);
+          const { error } = await supabase.from("usuario").select("id").limit(1);
           if (error) throw error;
           return {
             name: "Conexión a Supabase",
@@ -130,7 +129,7 @@ export default function DebugDeployPage() {
       setLoading(false);
     };
 
-    runTests();
+    void runTests();
   }, []);
 
   // 🟢🟡🔴 colores
