@@ -1,12 +1,39 @@
-import { useEffect } from 'react';
-import { useGoogleLoginHandler } from '../../services/authService';
+import { useEffect, useState } from "react";
+import { useRouter } from "next/router";
+import { supabase } from "../../lib/supabaseClient";
 
 export default function Callback() {
-  const { handleGoogleLoginRedirect } = useGoogleLoginHandler();
+  const router = useRouter();
+  const [msg, setMsg] = useState("Procesando login...");
 
   useEffect(() => {
-    handleGoogleLoginRedirect();
-  }, [handleGoogleLoginRedirect]);
+    const run = async () => {
+      try {
+        const url = new URL(window.location.href);
+        const err = url.searchParams.get("error_description");
+        if (err) {
+          setMsg(`Error: ${err}`);
+          await router.replace("/auth/login?error=" + encodeURIComponent(err));
+          return;
+        }
 
-  return <p className="text-center mt-10">Cargando...</p>;
+        // Intercambia el code por la sesión (PASO CLAVE)
+        const { error } = await supabase.auth.exchangeCodeForSession(window.location.href);
+        if (error) {
+          setMsg(`No se pudo finalizar el login: ${error.message}`);
+          await router.replace("/auth/login?error=" + encodeURIComponent(error.message));
+          return;
+        }
+
+        // Sesión OK → a tu página de pruebas / dashboard
+        await router.replace("/debug/auth");
+      } catch (e: any) {
+        setMsg(e?.message ?? "Error inesperado");
+        await router.replace("/auth/login?error=" + encodeURIComponent(e?.message ?? "unknown"));
+      }
+    };
+    run();
+  }, [router]);
+
+  return <p style={{ textAlign: "center", marginTop: 40 }}>{msg}</p>;
 }
