@@ -6,6 +6,7 @@ import React, {
   useRef,
   useState,
   ReactNode,
+  useCallback,
 } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabaseClient";
@@ -40,12 +41,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const mountedRef = useRef(true);
 
   useEffect(() => () => { mountedRef.current = false; }, []);
-  const safeSet = <T,>(setter: React.Dispatch<React.SetStateAction<T>>, value: T) => {
-    if (mountedRef.current) setter(value);
-  };
 
-  /** Crea fila en public.usuario si falta (onboarding suave) */
-  const ensureProfile = async (u: User): Promise<CustomUser | null> => {
+  // ✅ safeSet estable
+  const safeSet = useCallback(<T,>(setter: React.Dispatch<React.SetStateAction<T>>, value: T) => {
+    if (mountedRef.current) setter(value);
+  }, [mountedRef]);
+
+  /** ✅ ensureProfile estable (usada dentro de load) */
+  const ensureProfile = useCallback(async (u: User): Promise<CustomUser | null> => {
     const emailLower = u.email ? u.email.toLowerCase() : null;
 
     // ¿existe?
@@ -79,9 +82,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return null;
     }
     return inserted as CustomUser;
-  };
+  }, []);
 
-  const load = async () => {
+  /** ✅ load estable (usada en effect y expuesta como refresh) */
+  const load = useCallback(async () => {
     safeSet(setLoading, true);
 
     // 1) Sesión actual
@@ -115,8 +119,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // 5) Setear estado
     safeSet(setDbUser, profile);
     safeSet(setLoading, false);
-  };
+  }, [ensureProfile, safeSet]);
 
+  // ✅ Effect depende de load (función estable)
   useEffect(() => {
     if (didInit.current) return;
     didInit.current = true;
@@ -130,17 +135,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     });
 
     return () => { sub?.subscription.unsubscribe(); };
-  }, []);
+  }, [load, safeSet]);
 
-  const signOut = async () => {
+  // ✅ signOut estable
+  const signOut = useCallback(async () => {
     await supabase.auth.signOut();
     safeSet(setSessionUser, null);
     safeSet(setDbUser, null);
-  };
+  }, [safeSet]);
 
+  // ✅ Memo incluye load y signOut
   const value = useMemo<AuthContextType>(
     () => ({ sessionUser, dbUser, loading, refresh: load, signOut }),
-    [sessionUser, dbUser, loading]
+    [sessionUser, dbUser, loading, load, signOut]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
