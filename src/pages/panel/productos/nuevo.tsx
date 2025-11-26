@@ -11,7 +11,7 @@ const NuevoProductoPage: React.FC = () => {
   const [nombre, setNombre] = useState("");
   const [descripcion, setDescripcion] = useState("");
   const [precio, setPrecio] = useState<string>("");
-  const [stock, setStock] = useState<string>("0"); // 👈 NUEVO
+  const [stock, setStock] = useState<string>("0");
 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -27,33 +27,53 @@ const NuevoProductoPage: React.FC = () => {
       return;
     }
 
-    const precioNumber = Number(precio.replace(",", "."));
-    if (isNaN(precioNumber) || precioNumber <= 0) {
-      setErrorMsg("Ingresá un precio válido.");
+    // 🔐 Validación de nombre
+    const nombreTrim = nombre.trim();
+    if (!nombreTrim) {
+      setErrorMsg("El nombre del producto es obligatorio.");
+      return;
+    }
+    if (nombreTrim.length > 120) {
+      setErrorMsg("El nombre es demasiado largo (máx. 120 caracteres).");
       return;
     }
 
-    const stockNumber = parseInt(stock, 10); // 👈 NUEVO
+    // 🔐 Validación de precio
+    const precioNumber = Number(precio.replace(",", "."));
+    if (isNaN(precioNumber) || precioNumber <= 0) {
+      setErrorMsg("Ingresá un precio válido mayor a 0.");
+      return;
+    }
+    if (precioNumber > 9_999_999) {
+      setErrorMsg("El precio es demasiado alto para ser válido.");
+      return;
+    }
+
+    // 🔐 Validación de stock
+    const stockNumber = parseInt(stock, 10);
     if (isNaN(stockNumber) || stockNumber < 0) {
       setErrorMsg("Ingresá un stock válido (0 o más).");
+      return;
+    }
+    if (stockNumber > 999_999) {
+      setErrorMsg("El stock es demasiado alto para ser válido.");
       return;
     }
 
     setLoading(true);
 
     try {
-const { error } = await supabase
-  .from("producto")
-  .insert([
-    {
-      nombre: nombre.trim(),
-      descripcion: descripcion.trim() || null,
-      precio: precioNumber,
-      stock: stockNumber,
-      empresa_id: dbUser.empresa_id,
-    },
-  ]);
-
+      const { error } = await supabase
+        .from("producto")
+        .insert([
+          {
+            nombre: nombreTrim,
+            descripcion: descripcion.trim() || null,
+            precio: precioNumber,
+            stock: stockNumber,
+            empresa_id: dbUser.empresa_id,
+          },
+        ]);
 
       if (error) {
         console.error("[nuevo producto] error:", error);
@@ -145,7 +165,6 @@ const { error } = await supabase
           />
         </div>
 
-        {/* 👇 NUEVO CAMPO STOCK */}
         <div>
           <label className="mb-1 block text-sm font-medium text-slate-200">
             Stock
@@ -175,4 +194,3 @@ const { error } = await supabase
 };
 
 export default NuevoProductoPage;
-
