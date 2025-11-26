@@ -12,19 +12,29 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
   const { sessionUser, dbUser, loading } = useAuth();
   const router = useRouter();
 
-  // 🔒 Protección básica del panel
-  useEffect(() => {
-    if (!loading) {
-      // Si no hay sesión → al login
-      if (!sessionUser) {
-        router.replace("/auth/login");
-      }
-      // Si hay sesión pero no tiene empresa asociada → al registro de empresa
-      else if (!dbUser?.empresa_id) {
-        router.replace("/auth/registroempresa");
-      }
+useEffect(() => {
+  if (!loading) {
+    // 1) Sin sesión → login
+    if (!sessionUser) {
+      router.replace("/auth/login");
+      return;
     }
-  }, [sessionUser, dbUser, loading, router]);
+
+    // 2) Roles permitidos en el panel
+    const allowed = ["admin", "desarrollador"];
+    if (!dbUser || !allowed.includes(dbUser.rol)) {
+      router.replace("/auth/no-autorizado");
+      return;
+    }
+
+    // 3) Si tiene rol válido pero no tiene empresa → registroempresa
+    if (!dbUser.empresa_id) {
+      router.replace("/auth/registroempresa");
+      return;
+    }
+  }
+}, [sessionUser, dbUser, loading, router]);
+
 
   // Mientras carga autenticación
   if (loading) {
@@ -35,12 +45,11 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
     );
   }
 
-  // Mientras redirige (sin sesión o sin empresa)
+  // Mientras redirige
   if (!sessionUser || !dbUser?.empresa_id) {
     return null;
   }
 
-  // Layout del panel
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100">
       <PanelSidebar />
