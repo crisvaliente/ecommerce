@@ -42,19 +42,18 @@ const NuevoProductoPage: React.FC = () => {
     setLoading(true);
 
     try {
-      const { data, error } = await supabase
-        .from("producto")
-        .insert([
-          {
-            nombre: nombre.trim(),
-            descripcion: descripcion.trim() || null,
-            precio: precioNumber,
-            stock: stockNumber,          // 👈 NUEVO
-            empresa_id: dbUser.empresa_id,
-          },
-        ])
-        .select("id")
-        .single();
+const { error } = await supabase
+  .from("producto")
+  .insert([
+    {
+      nombre: nombre.trim(),
+      descripcion: descripcion.trim() || null,
+      precio: precioNumber,
+      stock: stockNumber,
+      empresa_id: dbUser.empresa_id,
+    },
+  ]);
+
 
       if (error) {
         console.error("[nuevo producto] error:", error);
