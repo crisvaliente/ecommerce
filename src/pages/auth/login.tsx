@@ -53,7 +53,7 @@ export default function LoginPage() {
           console.error(e);
           setErrorMsg(getErrorMessage(e) ?? "Error inicializando empresa");
         } finally {
-          router.replace("/debug/auth"); // o "/dashboard"
+          router.replace("/debug/auth"); // TODO: cambiar a "/panel" o lo que definas
           setBootstrapping(false);
         }
       })();
@@ -77,46 +77,60 @@ export default function LoginPage() {
       setErrorMsg(getErrorMessage(error));
       return;
     }
-    // Redirige el effect al detectar sesión
+    // El useEffect se encarga de redirigir cuando detecta la sesión
   };
 
-  // --- Login con Google ---
+  // --- Login con Google (funciona tanto en localhost como en Vercel) ---
   const handleGoogleLogin = async () => {
     setErrorMsg(null);
     setLoading(true);
 
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: "http://localhost:3000/auth/callback", // ajustá en Supabase y prod
-      },
-    });
+    try {
+      const redirectTo =
+        typeof window !== "undefined"
+          ? `${window.location.origin}/auth/callback`
+          : undefined;
 
-    if (error) {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo,
+        },
+      });
+
+      if (error) {
+        setErrorMsg(getErrorMessage(error));
+        setLoading(false);
+      }
+      // Si no hay error, Supabase redirige fuera de esta página
+    } catch (err) {
+      setErrorMsg(getErrorMessage(err));
       setLoading(false);
-      setErrorMsg(getErrorMessage(error));
     }
   };
 
   if (authLoading || bootstrapping) {
     return (
-      <div className="flex items-center justify-center h-screen">
+      <div className="flex h-screen items-center justify-center">
         <p className="text-gray-500">Cargando autenticación…</p>
       </div>
     );
   }
 
-  // Handlers tipados para inputs (evita any implícito si cambiás config)
   const onChangeEmail = (e: React.ChangeEvent<HTMLInputElement>) =>
     setEmail(e.target.value);
   const onChangePassword = (e: React.ChangeEvent<HTMLInputElement>) =>
     setPassword(e.target.value);
 
   return (
-    <div className="max-w-md mx-auto mt-10 p-6 border rounded shadow">
-      <h1 className="text-2xl mb-4 font-semibold">Iniciar sesión</h1>
+    <div className="mx-auto mt-10 max-w-md rounded border p-6 shadow">
+      <h1 className="mb-4 text-2xl font-semibold">Iniciar sesión</h1>
 
-      {errorMsg && <p className="text-red-600 mb-4 text-sm">{errorMsg}</p>}
+      {errorMsg && (
+        <p className="mb-4 text-sm text-red-600 whitespace-pre-wrap">
+          {errorMsg}
+        </p>
+      )}
 
       <form onSubmit={handleLogin} className="flex flex-col space-y-4">
         <input
@@ -125,7 +139,7 @@ export default function LoginPage() {
           value={email}
           onChange={onChangeEmail}
           required
-          className="border p-2 rounded"
+          className="rounded border p-2"
           autoComplete="email"
         />
         <input
@@ -134,13 +148,13 @@ export default function LoginPage() {
           value={password}
           onChange={onChangePassword}
           required
-          className="border p-2 rounded"
+          className="rounded border p-2"
           autoComplete="current-password"
         />
         <button
           type="submit"
           disabled={loading}
-          className="bg-blue-600 text-white p-2 rounded hover:bg-blue-700 disabled:opacity-60"
+          className="rounded bg-blue-600 p-2 text-white hover:bg-blue-700 disabled:opacity-60"
         >
           {loading ? "Ingresando..." : "Iniciar sesión"}
         </button>
@@ -151,7 +165,7 @@ export default function LoginPage() {
       <button
         onClick={handleGoogleLogin}
         disabled={loading}
-        className="bg-red-600 text-white p-2 rounded hover:bg-red-700 w-full disabled:opacity-60"
+        className="w-full rounded bg-red-600 p-2 text-white hover:bg-red-700 disabled:opacity-60"
       >
         {loading ? "Redirigiendo..." : "Iniciar sesión con Google"}
       </button>
@@ -159,7 +173,10 @@ export default function LoginPage() {
       <div className="mt-4 text-sm opacity-80">
         <p>
           ¿Querés probar la sesión actual?{" "}
-          <button onClick={() => go("/debug/auth")} className="text-blue-600 underline">
+          <button
+            onClick={() => go("/debug/auth")}
+            className="text-blue-600 underline"
+          >
             Ir a /debug/auth
           </button>
         </p>
