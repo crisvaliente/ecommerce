@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
-import NavLink from '../ui/NavLink'; // Importamos el NavLink
+import NavLink from '../ui/NavLink';
 import SearchBar from './SearchBar';
 import { useRouter } from 'next/router';
 import CartButton from '../ui/CartButton';
@@ -44,6 +44,7 @@ const Header: React.FC = () => {
         setUserMenuOpen(false);
       }
     };
+
     document.addEventListener('mousedown', handleClickOutside);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
@@ -53,23 +54,27 @@ const Header: React.FC = () => {
   return (
     <header className="bg-background text-foreground p-4 font-raleway">
       <div className="container mx-auto flex flex-wrap items-center justify-between">
+
         {/* Logo */}
         <div className="flex-shrink-0 bg-background p-1 rounded">
           <Link href="/">
-            <Image src="/images/logo.PNG" alt="Logo RÆYZ" width={40} height={40} className="h-10 w-auto" />
+            <Image
+              src="/images/logo.PNG"
+              alt="Logo RÆYZ"
+              width={40}
+              height={40}
+              className="h-10 w-auto"
+            />
           </Link>
         </div>
 
-        {/* Hamburger menu button for small screens */}
+        {/* Botón hamburguesa (mobile) */}
         <button
           className="block md:hidden text-white focus:outline-none"
           onClick={toggleMenu}
           aria-label="Toggle menu"
         >
-          <svg
-            className="h-6 w-6 fill-current"
-            viewBox="0 0 24 24"
-          >
+          <svg className="h-6 w-6 fill-current" viewBox="0 0 24 24">
             {menuOpen ? (
               <path
                 fillRule="evenodd"
@@ -85,40 +90,55 @@ const Header: React.FC = () => {
           </svg>
         </button>
 
-        {/* Menú con NavLink */}
-        <nav className={`w-full md:flex md:items-center md:w-auto ${menuOpen ? 'block' : 'hidden'} md:block`}>
+        {/* NAV principal */}
+        <nav
+          className={`w-full md:flex md:items-center md:w-auto ${
+            menuOpen ? 'block' : 'hidden'
+          } md:block`}
+        >
           <ul className="flex flex-col md:flex-row md:justify-center md:space-x-8 text-lg">
-            <li><NavLink href="/" >Inicio</NavLink></li>
-            <li><NavLink href="/coleccion" >Colección</NavLink></li>
-            <li><NavLink href="/nosotros" >Nosotros</NavLink></li>
-            <li><NavLink href="/contacto" >Contacto</NavLink></li>
-            {dbUser?.rol === 'admin' && (
-              <>
-                <li><NavLink href="/dashboard/usuarios">Gestión Usuarios</NavLink></li>
-                <li><NavLink href="/dashboard/productos">Gestión Productos</NavLink></li>
-                <li><NavLink href="/dashboard/reportes">Reportes</NavLink></li>
-              </>
+            {/* Links públicos */}
+            <li>
+              <NavLink href="/">Inicio</NavLink>
+            </li>
+            <li>
+              <NavLink href="/coleccion">Colección</NavLink>
+            </li>
+            <li>
+              <NavLink href="/nosotros">Nosotros</NavLink>
+            </li>
+            <li>
+              <NavLink href="/contacto">Contacto</NavLink>
+            </li>
+
+            {/* Acceso al panel solo para admin/dueña */}
+            {(dbUser?.rol === 'admin' || dbUser?.rol === 'dueña') && (
+              <li>
+                <NavLink href="/panel">Panel</NavLink>
+              </li>
             )}
-            {dbUser?.rol === 'dueña' && (
-              <>
-                <li><NavLink href="/dashboard/ventas">Dashboard Ventas</NavLink></li>
-                <li><NavLink href="/dashboard/productos">Gestión Productos</NavLink></li>
-                <li><NavLink href="/dashboard/reportes">Reportes</NavLink></li>
-              </>
-            )}
+
+            {/* Extra para usuarios logueados con rol "usuario" */}
             {dbUser?.rol === 'usuario' && (
               <>
-                <li><NavLink href="/coleccion">Catálogo</NavLink></li>
-                <li><NavLink href="/mis-ordenes">Mis Órdenes</NavLink></li>
-                <li><NavLink href="/mi-cuenta">Mi Cuenta</NavLink></li>
+                <li>
+                  <NavLink href="/coleccion">Catálogo</NavLink>
+                </li>
+                <li>
+                  <NavLink href="/mis-ordenes">Mis Órdenes</NavLink>
+                </li>
+                <li>
+                  <NavLink href="/mi-cuenta">Mi Cuenta</NavLink>
+                </li>
               </>
             )}
           </ul>
         </nav>
 
-        {/* Search + Cart + User Menu */}
+        {/* Search + User + Cart */}
         <div className="flex items-center gap-4 flex-shrink-0 mt-4 md:mt-0 w-full md:w-auto">
           <SearchBar onSearch={handleSearch} placeholder="Buscar..." />
+
           {sessionUser ? (
             <div className="relative" ref={userMenuRef}>
               <button
@@ -129,34 +149,54 @@ const Header: React.FC = () => {
               >
                 <span>{dbUser?.nombre || sessionUser.email}</span>
                 <svg
-                  className={`w-4 h-4 transition-transform duration-200 ${userMenuOpen ? 'transform rotate-180' : ''}`}
+                  className={`w-4 h-4 transition-transform duration-200 ${
+                    userMenuOpen ? 'transform rotate-180' : ''
+                  }`}
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="2"
                   viewBox="0 0 24 24"
-                  xmlns="http://www.w3.org/2000/svg"
                 >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7"></path>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                 </svg>
               </button>
+
               {userMenuOpen && (
                 <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-50 text-gray-800">
-                  <Link href="/mis-ordenes" className="block px-4 py-2 hover:bg-gray-100 cursor-pointer">
+                  <Link
+                    href="/mis-ordenes"
+                    className="block px-4 py-2 hover:bg-gray-100 cursor-pointer"
+                  >
                     Mis órdenes
                   </Link>
-                  <Link href="/mi-cuenta" className="block px-4 py-2 hover:bg-gray-100 cursor-pointer">
+                  <Link
+                    href="/mi-cuenta"
+                    className="block px-4 py-2 hover:bg-gray-100 cursor-pointer"
+                  >
                     Mi cuenta
                   </Link>
-                  <Link href="/mi-billetera" className="block px-4 py-2 hover:bg-gray-100 cursor-pointer">
+                  <Link
+                    href="/mi-billetera"
+                    className="block px-4 py-2 hover:bg-gray-100 cursor-pointer"
+                  >
                     Mi Billetera
                   </Link>
-                  <Link href="/rastrear-pedido" className="block px-4 py-2 hover:bg-gray-100 cursor-pointer">
+                  <Link
+                    href="/rastrear-pedido"
+                    className="block px-4 py-2 hover:bg-gray-100 cursor-pointer"
+                  >
                     Rastrear pedido
                   </Link>
-                  <Link href="/sorteo-mensual" className="block px-4 py-2 hover:bg-gray-100 cursor-pointer">
+                  <Link
+                    href="/sorteo-mensual"
+                    className="block px-4 py-2 hover:bg-gray-100 cursor-pointer"
+                  >
                     Sorteo mensual
                   </Link>
-                  <Link href="/devoluciones" className="block px-4 py-2 hover:bg-gray-100 cursor-pointer">
+                  <Link
+                    href="/devoluciones"
+                    className="block px-4 py-2 hover:bg-gray-100 cursor-pointer"
+                  >
                     Devoluciones
                   </Link>
                   <button
@@ -171,6 +211,7 @@ const Header: React.FC = () => {
           ) : (
             <LoginMenu />
           )}
+
           <CartButton itemCount={itemCount} />
         </div>
       </div>
