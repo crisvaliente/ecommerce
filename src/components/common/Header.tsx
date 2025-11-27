@@ -50,6 +50,11 @@ const Header: React.FC = () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
+  console.log("HEADER DEBUG", {
+  sessionEmail: sessionUser?.email,
+  dbUserEmail: dbUser?.correo,
+  dbUserRol: dbUser?.rol,
+});
 
   return (
     <header className="bg-background text-foreground p-4 font-raleway">
