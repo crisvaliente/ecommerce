@@ -22,9 +22,12 @@ export default function Callback() {
         }
 
         // Intercambia el code por la sesión (PASO CLAVE)
-        const { error } = await supabase.auth.exchangeCodeForSession(
+        const { data, error } = await supabase.auth.exchangeCodeForSession(
           window.location.href
         );
+
+        // 🔥 DEBUG: ver qué devuelve en producción
+        console.log("[CALLBACK] exchange result", { data, error });
 
         if (error) {
           setMsg(`No se pudo finalizar el login: ${error.message}`);
@@ -37,7 +40,6 @@ export default function Callback() {
         // ✅ Sesión OK → redirigir a tu página de pruebas / dashboard
         await router.replace("/debug/auth");
       } catch (e) {
-        // Tipado defensivo: `unknown` en lugar de `any`
         const err =
           e instanceof Error
             ? e.message
