@@ -40,56 +40,78 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const didInit = useRef(false);
   const mountedRef = useRef(true);
 
-  useEffect(() => () => { mountedRef.current = false; }, []);
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+    },
+    []
+  );
 
   // ✅ safeSet estable
-  const safeSet = useCallback(<T,>(setter: React.Dispatch<React.SetStateAction<T>>, value: T) => {
-    if (mountedRef.current) setter(value);
-  }, [mountedRef]);
+  const safeSet = useCallback(
+    <T,>(setter: React.Dispatch<React.SetStateAction<T>>, value: T) => {
+      if (mountedRef.current) setter(value);
+    },
+    [mountedRef]
+  );
 
   /** ✅ ensureProfile estable (usada dentro de load) */
-  const ensureProfile = useCallback(async (u: User): Promise<CustomUser | null> => {
-    const emailLower = u.email ? u.email.toLowerCase() : null;
+  const ensureProfile = useCallback(
+    async (u: User): Promise<CustomUser | null> => {
+      const emailLower = u.email ? u.email.toLowerCase() : null;
 
-    // ¿existe?
-    const { data: existing, error: exErr } = await supabase
-      .from("usuario")
-      .select("id, supabase_uid, nombre, correo, rol, empresa_id")
-      .eq("supabase_uid", u.id)
-      .maybeSingle();
+      // Nombre desde metadata (Google u otros providers)
+      const fullName =
+        (u.user_metadata &&
+          (u.user_metadata.full_name ||
+            u.user_metadata.name ||
+            u.user_metadata.user_name)) ||
+        null;
 
-    if (exErr) {
-      console.debug("[auth] ensureProfile select error:", exErr);
-      return null;
-    }
-    if (existing) return existing as CustomUser;
+      // ¿existe?
+      const { data: existing, error: exErr } = await supabase
+        .from("usuario")
+        .select("id, supabase_uid, nombre, correo, rol, empresa_id")
+        .eq("supabase_uid", u.id)
+        .maybeSingle();
 
-    // crear
-    const { data: inserted, error: insErr } = await supabase
-      .from("usuario")
-      .insert({
-        supabase_uid: u.id,
-        correo: emailLower,
-        nombre: null,
-        rol: "invitado",
-        empresa_id: null,
-      })
-      .select("id, supabase_uid, nombre, correo, rol, empresa_id")
-      .single();
+      if (exErr) {
+        console.debug("[auth] ensureProfile select error:", exErr);
+        return null;
+      }
+      if (existing) return existing as CustomUser;
 
-    if (insErr) {
-      console.debug("[auth] ensureProfile insert error:", insErr);
-      return null;
-    }
-    return inserted as CustomUser;
-  }, []);
+      // crear
+      const { data: inserted, error: insErr } = await supabase
+        .from("usuario")
+        .insert({
+          supabase_uid: u.id,
+          correo: emailLower,
+          nombre: fullName, // ⬅️ ahora guardamos el nombre real
+          rol: "invitado",
+          empresa_id: null,
+        })
+        .select("id, supabase_uid, nombre, correo, rol, empresa_id")
+        .single();
+
+      if (insErr) {
+        console.debug("[auth] ensureProfile insert error:", insErr);
+        return null;
+      }
+      return inserted as CustomUser;
+    },
+    []
+  );
 
   /** ✅ load estable (usada en effect y expuesta como refresh) */
   const load = useCallback(async () => {
     safeSet(setLoading, true);
 
     // 1) Sesión actual
-    const { data: { session }, error: sErr } = await supabase.auth.getSession();
+    const {
+      data: { session },
+      error: sErr,
+    } = await supabase.auth.getSession();
     if (sErr) console.debug("[auth] getSession error:", sErr);
 
     const u = session?.user ?? null;
@@ -129,12 +151,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     load();
 
     // Cambios de sesión
-    const { data: sub } = supabase.auth.onAuthStateChange((_evt, newSession) => {
-      safeSet(setSessionUser, newSession?.user ?? null);
-      load();
-    });
+    const { data: sub } = supabase.auth.onAuthStateChange(
+      (_evt, newSession) => {
+        safeSet(setSessionUser, newSession?.user ?? null);
+        load();
+      }
+    );
 
-    return () => { sub?.subscription.unsubscribe(); };
+    return () => {
+      sub?.subscription.unsubscribe();
+    };
   }, [load, safeSet]);
 
   // ✅ signOut estable
@@ -150,7 +176,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     [sessionUser, dbUser, loading, load, signOut]
   );
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+  );
 };
 
 export const useAuth = (): AuthContextType => {
