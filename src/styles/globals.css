@@ -1,17 +1,199 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Raleway:wght@500;700;900&display=swap');
-
+/* === Tailwind === */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* === Design System Raeyz – Core Tokens === */
+
+/* 1) Fuentes (import rápido desde Google Fonts) */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Raleway:wght@500;600;700;800;900&display=swap");
+
+/* 2) CSS Variables globales */
 :root {
-  --background: #EEECE1;
-  --foreground: #0D0D0E;
-  --primary: #E30B13;
+  /* Colores base (del manual de marca) */
+  --rz-color-primary: #E30B13;   /* Rojo Raeyz – botones, acentos */
+  --rz-color-dark: #0D0D0E;      /* Negro casi absoluto – texto/fondos oscuros */
+  --rz-color-light: #EEECE1;     /* Arena clara – fondo principal del panel */
+
+  /* Variaciones útiles */
+  --rz-color-border: rgba(13, 13, 14, 0.12);
+  --rz-color-muted: rgba(13, 13, 14, 0.6);
+  --rz-color-surface: #ffffff;   /* Cards, cajas elevadas */
+
+  /* Tipografías */
+  --rz-font-title: "Raleway", system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  --rz-font-body: "Inter", system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+
+  /* Radios y sombras */
+  --rz-radius-lg: 16px;
+  --rz-radius-md: 10px;
+  --rz-radius-sm: 6px;
+
+  --rz-shadow-soft: 0 12px 30px rgba(0, 0, 0, 0.1);
+
+  /* Espaciado base (8px scale) */
+  --rz-space-1: 4px;
+  --rz-space-2: 8px;
+  --rz-space-3: 12px;
+  --rz-space-4: 16px;
+  --rz-space-5: 24px;
+  --rz-space-6: 32px;
 }
 
+/* 3) Reseteo suave + base tipográfica */
+
+html,
 body {
-  background-color: var(--background);
-  color: var(--foreground);
-  font-family: 'Inter', sans-serif;
+  padding: 0;
+  margin: 0;
+  background-color: var(--rz-color-light);
+  color: var(--rz-color-dark);
+  font-family: var(--rz-font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Scroll minimal Raeyz */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--rz-color-primary) var(--rz-color-light);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--rz-color-light);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--rz-color-primary);
+}
+
+/* Links */
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* 4) Títulos con Raleway */
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--rz-font-title);
+  margin: 0;
+}
+
+/* 5) Helper para contenedor del panel */
+.rz-admin-shell {
+  min-height: 100vh;
+  background-color: var(--rz-color-light);
+}
+
+/* 6) Clase base para cards */
+.rz-card {
+  background-color: var(--rz-color-surface);
+  border-radius: var(--rz-radius-md);
+  box-shadow: var(--rz-shadow-soft);
+  padding: var(--rz-space-4);
+  border: 1px solid var(--rz-color-border);
+}
+
+/* 7) Modo panel oscuro (por si lo usamos en alguna vista puntual) */
+.rz-panel-dark {
+  background-color: var(--rz-color-dark);
+  color: var(--rz-color-light);
+}
+
+/* === Sidebar Raeyz – Panel Admin === */
+
+.rz-sidebar {
+  width: 260px;
+  background-color: var(--rz-color-dark);
+  color: var(--rz-color-light);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  padding: var(--rz-space-4) var(--rz-space-3);
+  gap: var(--rz-space-4);
+}
+
+.rz-sidebar-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rz-sidebar-brand {
+  font-family: var(--rz-font-title);
+  font-size: 1.2rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.rz-sidebar-subtitle {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.rz-sidebar-nav {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: var(--rz-space-2);
+}
+
+.rz-sidebar-link {
+  display: flex;
+  align-items: center;
+  padding: 0.55rem 0.9rem;
+  border-radius: var(--rz-radius-md);
+  font-size: 0.875rem;
+  color: rgba(255, 255, 255, 0.75);
+  text-decoration: none;
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.12s ease;
+}
+
+.rz-sidebar-link:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+  transform: translateX(2px);
+}
+
+.rz-sidebar-link--active {
+  background: linear-gradient(
+    90deg,
+    var(--rz-color-primary),
+    #ff4040
+  );
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.rz-sidebar-footer {
+  margin-top: var(--rz-space-3);
+  padding-top: var(--rz-space-2);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.6);
 }
