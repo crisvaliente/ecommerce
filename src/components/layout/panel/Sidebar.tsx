@@ -6,7 +6,7 @@ import { useAuth } from "../../../context/AuthContext";
 type PanelLink = {
   href: string;
   label: string;
-  allowedRoles?: string[]; // si se omite → todos los roles que llegan al panel
+  allowedRoles?: string[];
 };
 
 const links: PanelLink[] = [
@@ -28,15 +28,14 @@ const links: PanelLink[] = [
   {
     href: "/panel/payments",
     label: "Pagos",
-    allowedRoles: ["admin"], // ej: solo admin maneja pagos
+    allowedRoles: ["admin"],
   },
-  // Ejemplo futuro:
-  // { href: "/panel/usuarios", label: "Gestión usuarios", allowedRoles: ["admin"] },
 ];
 
 const PanelSidebar: React.FC = () => {
   const router = useRouter();
-  const { dbUser } = useAuth();
+  const { dbUser, sessionUser } = useAuth();
+
   const role = dbUser?.rol ?? "invitado";
 
   const visibleLinks = links.filter(
@@ -44,33 +43,47 @@ const PanelSidebar: React.FC = () => {
   );
 
   return (
-    <aside className="flex h-screen w-64 flex-col border-r border-slate-800 bg-slate-950/80">
-      <div className="px-4 py-4 text-lg font-semibold tracking-wide">
-        Raeyz Panel
+    <aside className="rz-sidebar">
+      <div className="rz-sidebar-header">
+        <span className="rz-sidebar-brand">RAEYZ</span>
+        <span className="rz-sidebar-subtitle">Panel administrativo</span>
       </div>
-      <nav className="flex-1 space-y-1 px-2">
+
+      <nav className="rz-sidebar-nav">
         {visibleLinks.map((link) => {
-          const active = router.pathname === link.href;
+          const active = router.pathname.startsWith(link.href);
+
           return (
             <Link
               key={link.href}
               href={link.href}
-              className={`block rounded-lg px-3 py-2 text-sm ${
-                active
-                  ? "bg-slate-800 text-slate-50"
-                  : "text-slate-300 hover:bg-slate-900 hover:text-slate-50"
-              }`}
+              className={
+                "rz-sidebar-link " +
+                (active ? "rz-sidebar-link--active" : "")
+              }
             >
               {link.label}
             </Link>
           );
         })}
+
         {visibleLinks.length === 0 && (
-          <p className="px-3 py-2 text-xs text-slate-500">
-            No tenés secciones disponibles en el panel con tu rol actual.
+          <p className="rz-sidebar-link text-xs opacity-60">
+            No tenés secciones disponibles con tu rol actual.
           </p>
         )}
       </nav>
+
+<div className="rz-sidebar-footer">
+  {dbUser && (
+    <>
+      <div>
+        Usuario: {dbUser?.nombre || sessionUser?.email}
+      </div>
+      <div>Rol: {dbUser?.rol}</div>
+    </>
+  )}
+</div>
     </aside>
   );
 };
