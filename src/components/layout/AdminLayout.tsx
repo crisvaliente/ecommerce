@@ -1,3 +1,4 @@
+// src/components/layout/AdminLayout.tsx
 import React, { ReactNode, useEffect } from "react";
 import { useRouter } from "next/router";
 import { useAuth } from "../../context/AuthContext";
@@ -8,58 +9,59 @@ interface AdminLayoutProps {
   children: ReactNode;
 }
 
+const allowedRoles = ["admin", "desarrollador"];
+
 const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
   const { sessionUser, dbUser, loading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading) {
-      // 1) Sin sesión → login
-      if (!sessionUser) {
-        router.replace("/auth/login");
-        return;
-      }
+    if (loading) return;
 
-      // 2) Roles permitidos en el panel
-      const allowed = ["admin", "desarrollador"];
-      if (!dbUser || !allowed.includes(dbUser.rol)) {
-        router.replace("/auth/no-autorizado");
-        return;
-      }
+    if (!sessionUser) {
+      router.replace("/auth/login");
+      return;
+    }
 
-      // 3) Si tiene rol válido pero no tiene empresa → registroempresa
-      if (!dbUser.empresa_id) {
-        router.replace("/auth/registroempresa");
-        return;
-      }
+    if (!dbUser || !allowedRoles.includes(dbUser.rol)) {
+      router.replace("/auth/no-autorizado");
+      return;
+    }
+
+    if (!dbUser.empresa_id) {
+      router.replace("/auth/registroempresa");
+      return;
     }
   }, [sessionUser, dbUser, loading, router]);
 
-  // Mientras carga autenticación
   if (loading) {
     return (
-      <div className="rz-admin-shell flex items-center justify-center">
-        <div className="rz-card">
-          <p className="text-sm">Cargando panel…</p>
-        </div>
+      <div className="flex h-screen items-center justify-center">
+        <p className="text-sm text-gray-700">Cargando panel…</p>
       </div>
     );
   }
 
-  // Mientras redirige o no hay empresa
   if (!sessionUser || !dbUser?.empresa_id) {
     return null;
   }
 
   return (
-    <div className="rz-admin-shell flex">
+    <div className="flex min-h-screen">
       <PanelSidebar />
+
       <div className="flex flex-1 flex-col">
         <PanelNavbar />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+
+        <main className="flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-6xl px-6 py-8">
+            {children}
+          </div>
+        </main>
       </div>
     </div>
   );
 };
 
 export default AdminLayout;
+
