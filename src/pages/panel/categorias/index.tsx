@@ -53,7 +53,7 @@ const CategoriasPage: React.FC = () => {
 
       if (error) throw error;
       setCategorias(data || []);
-    } catch (err: any) {
+    } catch (err) {
       console.error("Error cargando categorías", err);
       setErrorMsg("No se pudieron cargar las categorías.");
     } finally {
@@ -85,7 +85,7 @@ const CategoriasPage: React.FC = () => {
       const { error } = await supabase.from("categoria").delete().eq("id", id);
       if (error) throw error;
       await fetchCategorias();
-    } catch (err: any) {
+    } catch (err) {
       console.error("Error eliminando categoría", err);
       setErrorMsg(
         "No se pudo eliminar la categoría. Verificá si no tiene productos asociados."
@@ -140,7 +140,7 @@ const CategoriasPage: React.FC = () => {
 
       resetForm();
       await fetchCategorias();
-    } catch (err: any) {
+    } catch (err) {
       console.error("Error guardando categoría", err);
       setErrorMsg("No se pudo guardar la categoría.");
     } finally {
