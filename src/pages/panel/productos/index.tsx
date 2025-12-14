@@ -9,14 +9,16 @@ type Producto = {
   nombre: string;
   descripcion?: string | null;
   precio: number;
-  estado?: string | null; // la dejamos opcional por si después la agregamos en la BD
+  estado?: string | null;
 };
 
 const ProductosPage: React.FC = () => {
   const { dbUser } = useAuth();
+
   const [productos, setProductos] = useState<Producto[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchProductos = async () => {
@@ -28,11 +30,9 @@ const ProductosPage: React.FC = () => {
         }
 
         const { data, error } = await supabase
-  .from("producto")
-  .select("id, nombre, descripcion, precio")
-  .eq("empresa_id", dbUser.empresa_id);
-  // sin order de momento
-
+          .from("producto")
+          .select("id, nombre, descripcion, precio")
+          .eq("empresa_id", dbUser.empresa_id);
 
         if (error) {
           console.error("[productos] error:", error);
@@ -51,6 +51,30 @@ const ProductosPage: React.FC = () => {
     fetchProductos();
   }, [dbUser?.empresa_id]);
 
+  const handleDelete = async (id: string) => {
+    const ok = window.confirm("¿Seguro que querés eliminar este producto?");
+    if (!ok) return;
+
+    setDeletingId(id);
+    setErrorMsg(null);
+
+    const { error } = await supabase
+      .from("producto")
+      .delete()
+      .eq("id", id)
+      .eq("empresa_id", dbUser?.empresa_id);
+
+    if (error) {
+      console.error("[productos] delete error:", error);
+      setErrorMsg("No se pudo eliminar el producto.");
+      setDeletingId(null);
+      return;
+    }
+
+    setProductos((prev) => prev.filter((p) => p.id !== id));
+    setDeletingId(null);
+  };
+
   return (
     <AdminLayout>
       <div className="mb-4 flex items-center justify-between">
@@ -60,6 +84,7 @@ const ProductosPage: React.FC = () => {
             Gestioná los productos de tu tienda.
           </p>
         </div>
+
         <Link
           href="/panel/productos/nuevo"
           className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
@@ -102,25 +127,43 @@ const ProductosPage: React.FC = () => {
                 </th>
               </tr>
             </thead>
+
             <tbody>
               {productos.map((p) => (
                 <tr key={p.id} className="border-t border-slate-800">
                   <td className="px-4 py-2">{p.nombre}</td>
+
                   <td className="px-4 py-2">
                     {Number(p.precio).toLocaleString("es-UY", {
                       style: "currency",
                       currency: "UYU",
                     })}
                   </td>
-                  {/* Como no viene de la BD, usamos 'activo' por defecto */}
+
                   <td className="px-4 py-2">{p.estado ?? "activo"}</td>
+
                   <td className="px-4 py-2 text-right">
-                    <Link
-                      href={`/panel/productos/${p.id}`}
-                      className="text-xs font-medium text-emerald-400 hover:underline"
-                    >
-                      Editar
-                    </Link>
+                    <div className="inline-flex items-center gap-3">
+                      <Link
+                        href={`/panel/productos/${p.id}`}
+                        className="text-xs font-medium text-emerald-400 hover:underline"
+                      >
+                        Editar
+                      </Link>
+
+                      <button
+                        type="button"
+                        disabled={deletingId === p.id}
+                        onClick={() => handleDelete(p.id)}
+                        className={`text-xs font-medium ${
+                          deletingId === p.id
+                            ? "text-slate-500 cursor-not-allowed"
+                            : "text-rose-400 hover:underline"
+                        }`}
+                      >
+                        {deletingId === p.id ? "Eliminando…" : "Eliminar"}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
