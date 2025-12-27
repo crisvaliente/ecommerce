@@ -31,8 +31,10 @@ const ProductosPage: React.FC = () => {
 
         const { data, error } = await supabase
           .from("producto")
-          .select("id, nombre, descripcion, precio")
+          .select("id, nombre, descripcion, precio, estado")
           .eq("empresa_id", dbUser.empresa_id);
+
+          console.log("[productos] data:", data); 
 
         if (error) {
           console.error("[productos] error:", error);
@@ -140,7 +142,7 @@ const ProductosPage: React.FC = () => {
                     })}
                   </td>
 
-                  <td className="px-4 py-2">{p.estado ?? "activo"}</td>
+                  <td className="px-4 py-2">{p.estado}</td>
 
                   <td className="px-4 py-2 text-right">
                     <div className="inline-flex items-center gap-3">

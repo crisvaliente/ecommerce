@@ -15,6 +15,7 @@ type ProductoFormState = {
   stock: number | string;
   tipo: string;
   categoria_id: string | null;
+  estado: string | null;
 };
 
 interface Props {
@@ -42,6 +43,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
     stock: "",
     tipo: "",
     categoria_id: null,
+    estado: "draft",
   });
 
   // ============================
@@ -93,6 +95,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
           stock: data.stock,
           tipo: data.tipo || "",
           categoria_id: data.categoria_id,
+          estado: data.estado ?? "draft",
         });
       } else {
         console.error("Error cargando producto:", error);
@@ -142,6 +145,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
       tipo: form.tipo || null,
       categoria_id: form.categoria_id,
       empresa_id: empresaId,
+      estado: form.estado,
     };
 
     const { error } = await supabase.from("producto").upsert(payload);
