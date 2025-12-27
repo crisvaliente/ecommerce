@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import { supabase } from "../../../lib/supabaseClient";
 import { useAuth } from "../../../context/AuthContext";
@@ -8,6 +8,8 @@ type Categoria = {
   nombre: string;
 };
 
+type ProductoEstado = "draft" | "published";
+
 type ProductoFormState = {
   nombre: string;
   descripcion: string;
@@ -15,17 +17,15 @@ type ProductoFormState = {
   stock: number | string;
   tipo: string;
   categoria_id: string | null;
+  estado: ProductoEstado; // ✅ B1
 };
 
 interface Props {
-  // si está, es edición; si no, creación
   productoId?: string;
 }
 
 const ProductForm: React.FC<Props> = ({ productoId }) => {
   const router = useRouter();
-
-  // 🔧 Acá estaba el problema: en el contexto no hay "user", sino "dbUser"
   const { dbUser } = useAuth();
   const empresaId = dbUser?.empresa_id as string | undefined;
 
@@ -33,6 +33,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   const [loadingCategorias, setLoadingCategorias] = useState(true);
 
   const [saving, setSaving] = useState(false);
+  const [transitioning, setTransitioning] = useState(false);
   const [loadingProducto, setLoadingProducto] = useState(!!productoId);
 
   const [form, setForm] = useState<ProductoFormState>({
@@ -42,10 +43,18 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
     stock: "",
     tipo: "",
     categoria_id: null,
+    estado: "draft", // ✅ por defecto, nuevo producto arranca como borrador
   });
 
+  const badge = useMemo(() => {
+    if (form.estado === "published") {
+      return { label: "Publicado", cls: "bg-emerald-600/20 text-emerald-200 border-emerald-500/40" };
+    }
+    return { label: "Borrador", cls: "bg-amber-600/20 text-amber-200 border-amber-500/40" };
+  }, [form.estado]);
+
   // ============================
-  // 1) Traer categorías de la empresa
+  // 1) Traer categorías
   // ============================
   useEffect(() => {
     const fetchCategorias = async () => {
@@ -60,11 +69,8 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
         .eq("empresa_id", empresaId)
         .order("nombre", { ascending: true });
 
-      if (!error && data) {
-        setCategorias(data);
-      } else {
-        console.error("Error cargando categorías:", error);
-      }
+      if (!error && data) setCategorias(data);
+      else console.error("Error cargando categorías:", error);
 
       setLoadingCategorias(false);
     };
@@ -73,7 +79,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   }, [empresaId]);
 
   // ============================
-  // 2) Si es edición → cargar producto
+  // 2) Si edición → cargar producto (incluye estado)
   // ============================
   useEffect(() => {
     if (!productoId) return;
@@ -93,6 +99,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
           stock: data.stock,
           tipo: data.tipo || "",
           categoria_id: data.categoria_id,
+          estado: (data.estado as ProductoEstado) || "draft",
         });
       } else {
         console.error("Error cargando producto:", error);
@@ -105,12 +112,10 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   }, [productoId]);
 
   // ============================
-  // 3) Handler de inputs
+  // 3) Handler inputs
   // ============================
   const handleChange = (
-    e: React.ChangeEvent<
-      HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
-    >
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) => {
     const { name, value } = e.target;
 
@@ -121,20 +126,24 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   };
 
   // ============================
-  // 4) Guardar producto
+  // Helpers: guardar (sin cambiar estado)
   // ============================
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
+  const saveProducto = async (overrideEstado?: ProductoEstado) => {
     if (!empresaId) {
       alert("No se encontró empresa asociada al usuario.");
-      return;
+      return { ok: false as const, id: null as string | null };
     }
 
-    setSaving(true);
+    // Validaciones mínimas (por si publicás directo)
+    if (!form.nombre.trim()) {
+      alert("El nombre es obligatorio.");
+      return { ok: false as const, id: null as string | null };
+    }
+
+    const estadoToSave = overrideEstado ?? form.estado;
 
     const payload = {
-      id: productoId || undefined,
+      ...(productoId ? { id: productoId } : {}),
       nombre: form.nombre,
       descripcion: form.descripcion || null,
       precio: Number(form.precio),
@@ -142,19 +151,91 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
       tipo: form.tipo || null,
       categoria_id: form.categoria_id,
       empresa_id: empresaId,
+      estado: estadoToSave, // ✅ B1
     };
 
-    const { error } = await supabase.from("producto").upsert(payload);
+    if (productoId) {
+      // update
+      const { error } = await supabase.from("producto").update(payload).eq("id", productoId);
+      if (error) {
+        console.error("Error actualizando producto:", error);
+        alert("Error guardando producto.");
+        return { ok: false as const, id: null as string | null };
+      }
+      setForm((p) => ({ ...p, estado: estadoToSave }));
+      return { ok: true as const, id: productoId };
+    }
 
+    // insert (necesitamos el id devuelto para “crear y publicar”)
+    const { data, error } = await supabase
+      .from("producto")
+      .insert(payload)
+      .select("id, estado")
+      .single();
+
+    if (error || !data) {
+      console.error("Error creando producto:", error);
+      alert("Error creando producto.");
+      return { ok: false as const, id: null as string | null };
+    }
+
+    setForm((p) => ({ ...p, estado: (data.estado as ProductoEstado) || estadoToSave }));
+    return { ok: true as const, id: data.id as string };
+  };
+
+  // ============================
+  // 4) Guardar normal (no cambia estado)
+  // ============================
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    setSaving(true);
+    const res = await saveProducto();
     setSaving(false);
 
-    if (error) {
-      console.error("Error al guardar producto:", error);
-      alert("Error guardando producto.");
+    if (!res.ok) return;
+
+    // ✅ vuelve al listado; el listado debería mostrar estado/badges
+    router.push("/panel/productos");
+  };
+
+  // ============================
+  // 5) Transiciones de estado (Publicar / Borrador)
+  // ============================
+  const handlePublish = async () => {
+    if (transitioning || saving) return;
+
+    setTransitioning(true);
+
+    // Si no existe aún, crea y publica en un paso
+    const res = await saveProducto("published");
+
+    setTransitioning(false);
+
+    if (!res.ok) return;
+
+    // Si venías desde "Nuevo", dejá el form ya en edición (URL con id),
+    // así no se “pierde” el id en el estado del router.
+    if (!productoId && res.id) {
+      router.replace(`/panel/productos/editar/${res.id}`);
+      return;
+    }
+  };
+
+  const handleDraft = async () => {
+    if (!productoId) {
+      // nuevo sin guardar ya es draft
+      setForm((p) => ({ ...p, estado: "draft" }));
       return;
     }
 
-    router.push("/panel/productos");
+    if (transitioning || saving) return;
+
+    setTransitioning(true);
+    const res = await saveProducto("draft");
+    setTransitioning(false);
+
+    if (!res.ok) return;
   };
 
   if (loadingProducto) {
@@ -163,6 +244,51 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5 p-4">
+      {/* Header estado */}
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div
+            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${badge.cls}`}
+          >
+            <span className="h-2 w-2 rounded-full bg-current opacity-80" />
+            {badge.label}
+          </div>
+
+          {form.estado === "draft" ? (
+            <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+              Este producto está en <b>borrador</b>. No debería mostrarse en la tienda hasta publicarlo.
+            </div>
+          ) : (
+            <div className="mt-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
+              Este producto está <b>publicado</b>. Se considera visible en la tienda.
+            </div>
+          )}
+        </div>
+
+        {/* Acciones de estado */}
+        <div className="flex flex-col gap-2 sm:flex-row">
+          {form.estado === "draft" ? (
+            <button
+              type="button"
+              onClick={handlePublish}
+              disabled={saving || transitioning}
+              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-60"
+            >
+              {transitioning ? "Publicando..." : "Publicar"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleDraft}
+              disabled={saving || transitioning}
+              className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm font-medium text-amber-100 hover:bg-amber-500/20 disabled:opacity-60"
+            >
+              {transitioning ? "Pasando a borrador..." : "Pasar a borrador"}
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Nombre */}
       <div>
         <label className="block font-medium">Nombre</label>
@@ -235,9 +361,9 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
           className="border rounded w-full px-3 py-2"
           disabled={loadingCategorias}
         >
-        <option value="">
-          {loadingCategorias ? "Cargando..." : "Sin categoría"}
-        </option>
+          <option value="">
+            {loadingCategorias ? "Cargando..." : "Sin categoría"}
+          </option>
 
           {categorias.map((cat) => (
             <option key={cat.id} value={cat.id}>
@@ -247,12 +373,13 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
         </select>
       </div>
 
+      {/* Guardar */}
       <button
         type="submit"
-        disabled={saving}
-        className="px-4 py-2 bg-black text-white rounded hover:bg-neutral-800"
+        disabled={saving || transitioning}
+        className="px-4 py-2 bg-black text-white rounded hover:bg-neutral-800 disabled:opacity-60"
       >
-        {saving ? "Guardando..." : productoId ? "Actualizar" : "Crear producto"}
+        {saving ? "Guardando..." : productoId ? "Guardar cambios" : "Crear producto"}
       </button>
     </form>
   );

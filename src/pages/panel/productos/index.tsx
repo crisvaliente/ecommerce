@@ -1,16 +1,20 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import AdminLayout from "../../../components/layout/AdminLayout";
 import { useAuth } from "../../../context/AuthContext";
 import { supabase } from "../../../lib/supabaseClient";
 import Link from "next/link";
+
+type ProductoEstado = "draft" | "published";
 
 type Producto = {
   id: string;
   nombre: string;
   descripcion?: string | null;
   precio: number;
-  estado?: string | null;
+  estado: ProductoEstado;
 };
+
+type FiltroEstado = "all" | "published" | "draft";
 
 const ProductosPage: React.FC = () => {
   const { dbUser } = useAuth();
@@ -19,6 +23,7 @@ const ProductosPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [filtro, setFiltro] = useState<FiltroEstado>("all");
 
   useEffect(() => {
     const fetchProductos = async () => {
@@ -31,8 +36,11 @@ const ProductosPage: React.FC = () => {
 
         const { data, error } = await supabase
           .from("producto")
-          .select("id, nombre, descripcion, precio")
-          .eq("empresa_id", dbUser.empresa_id);
+          .select("id, nombre, descripcion, precio, estado")
+          .eq("empresa_id", dbUser.empresa_id)
+          .order("nombre", { ascending: true });
+
+          console.log("[productos] data:", data); 
 
         if (error) {
           console.error("[productos] error:", error);
@@ -50,6 +58,11 @@ const ProductosPage: React.FC = () => {
 
     fetchProductos();
   }, [dbUser?.empresa_id]);
+
+  const productosFiltrados = useMemo(() => {
+    if (filtro === "all") return productos;
+    return productos.filter((p) => p.estado === filtro);
+  }, [productos, filtro]);
 
   const handleDelete = async (id: string) => {
     const ok = window.confirm("¿Seguro que querés eliminar este producto?");
@@ -75,9 +88,25 @@ const ProductosPage: React.FC = () => {
     setDeletingId(null);
   };
 
+  const renderEstadoBadge = (estado: ProductoEstado) => {
+    if (estado === "published") {
+      return (
+        <span className="inline-flex items-center rounded-full border border-emerald-500/40 bg-emerald-600/20 px-2.5 py-0.5 text-xs font-medium text-emerald-200">
+          Publicado
+        </span>
+      );
+    }
+
+    return (
+      <span className="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-600/20 px-2.5 py-0.5 text-xs font-medium text-amber-200">
+        Borrador
+      </span>
+    );
+  };
+
   return (
     <AdminLayout>
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Productos</h1>
           <p className="text-sm text-slate-300">
@@ -85,12 +114,25 @@ const ProductosPage: React.FC = () => {
           </p>
         </div>
 
-        <Link
-          href="/panel/productos/nuevo"
-          className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-        >
-          Nuevo producto
-        </Link>
+        <div className="flex items-center gap-3">
+          {/* Filtro estado */}
+          <select
+            value={filtro}
+            onChange={(e) => setFiltro(e.target.value as FiltroEstado)}
+            className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200"
+          >
+            <option value="all">Todos</option>
+            <option value="published">Publicados</option>
+            <option value="draft">Borradores</option>
+          </select>
+
+          <Link
+            href="/panel/productos/nuevo"
+            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+          >
+            Nuevo producto
+          </Link>
+        </div>
       </div>
 
       {loading && (
@@ -101,14 +143,13 @@ const ProductosPage: React.FC = () => {
         <p className="mb-3 text-sm text-rose-400">{errorMsg}</p>
       )}
 
-      {!loading && !errorMsg && productos.length === 0 && (
+      {!loading && !errorMsg && productosFiltrados.length === 0 && (
         <p className="text-sm text-slate-400">
-          Todavía no tenés productos cargados. Creá el primero con el botón
-          “Nuevo producto”.
+          No hay productos para el filtro seleccionado.
         </p>
       )}
 
-      {!loading && productos.length > 0 && (
+      {!loading && productosFiltrados.length > 0 && (
         <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-950/40">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-900/60">
@@ -129,7 +170,7 @@ const ProductosPage: React.FC = () => {
             </thead>
 
             <tbody>
-              {productos.map((p) => (
+              {productosFiltrados.map((p) => (
                 <tr key={p.id} className="border-t border-slate-800">
                   <td className="px-4 py-2">{p.nombre}</td>
 
@@ -140,7 +181,9 @@ const ProductosPage: React.FC = () => {
                     })}
                   </td>
 
-                  <td className="px-4 py-2">{p.estado ?? "activo"}</td>
+                  <td className="px-4 py-2">
+                    {renderEstadoBadge(p.estado)}
+                  </td>
 
                   <td className="px-4 py-2 text-right">
                     <div className="inline-flex items-center gap-3">
