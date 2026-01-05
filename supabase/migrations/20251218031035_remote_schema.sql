@@ -52,12 +52,25 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA "extensions";
 
 
 
-CREATE TYPE "public"."rol_membresia" AS ENUM (
-    'owner',
-    'admin',
-    'empleado',
-    'invitado'
-);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_type t
+    JOIN pg_namespace n ON n.oid = t.typnamespace
+    WHERE t.typname = 'rol_membresia'
+      AND n.nspname = 'public'
+  ) THEN
+    CREATE TYPE public.rol_membresia AS ENUM (
+      'owner',
+      'admin',
+      'empleado',
+      'invitado'
+    );
+  END IF;
+END
+$$;
+
 
 
 ALTER TYPE "public"."rol_membresia" OWNER TO "postgres";
