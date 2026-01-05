@@ -413,14 +413,45 @@ CREATE TABLE IF NOT EXISTS "public"."event_log" (
 ALTER TABLE "public"."event_log" OWNER TO "postgres";
 
 
-ALTER TABLE "public"."event_log" ALTER COLUMN "id" ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME "public"."event_log_id_seq"
+DO $$
+BEGIN
+  -- si la columna ya es IDENTITY, no hacemos nada
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'event_log'
+      AND column_name = 'id'
+      AND is_identity = 'YES'
+  ) THEN
+    RETURN;
+  END IF;
+
+  -- si el sequence ya existe, no intentamos recrearlo con el mismo nombre
+  IF EXISTS (
+    SELECT 1
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relkind = 'S'
+      AND c.relname = 'event_log_id_seq'
+      AND n.nspname = 'public'
+  ) THEN
+    RETURN;
+  END IF;
+
+  -- caso “nuevo”: creamos identity + sequence con nombre fijo
+  ALTER TABLE public.event_log
+  ALTER COLUMN id
+  ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.event_log_id_seq
     START WITH 1
     INCREMENT BY 1
     NO MINVALUE
     NO MAXVALUE
     CACHE 1
-);
+  );
+END
+$$;
 
 
 
