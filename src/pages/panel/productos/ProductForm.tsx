@@ -34,6 +34,8 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
   const [saving, setSaving] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
+
+  // ✅ si estamos editando, arrancamos en “cargando producto”
   const [loadingProducto, setLoadingProducto] = useState(!!productoId);
 
   const [form, setForm] = useState<ProductoFormState>({
@@ -48,9 +50,15 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
   const badge = useMemo(() => {
     if (form.estado === "published") {
-      return { label: "Publicado", cls: "bg-emerald-600/20 text-emerald-200 border-emerald-500/40" };
+      return {
+        label: "Publicado",
+        cls: "bg-emerald-600/20 text-emerald-200 border-emerald-500/40",
+      };
     }
-    return { label: "Borrador", cls: "bg-amber-600/20 text-amber-200 border-amber-500/40" };
+    return {
+      label: "Borrador",
+      cls: "bg-amber-600/20 text-amber-200 border-amber-500/40",
+    };
   }, [form.estado]);
 
   // ============================
@@ -80,25 +88,31 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
   // ============================
   // 2) Si edición → cargar producto (incluye estado)
+  //    ✅ PATCH: esperar empresaId + filtrar por empresa_id
   // ============================
   useEffect(() => {
     if (!productoId) return;
+    if (!empresaId) return; // ✅ evita pedir el producto sin tenancy (RLS/0 rows)
 
     const fetchProducto = async () => {
+      setLoadingProducto(true);
+
       const { data, error } = await supabase
         .from("producto")
-        .select("*")
+        // ✅ mejor contrato: no select("*")
+        .select("id,nombre,descripcion,precio,stock,tipo,estado,categoria_id")
         .eq("id", productoId)
+        .eq("empresa_id", empresaId) // ✅ clave: scope por tenant
         .single();
 
       if (!error && data) {
         setForm({
-          nombre: data.nombre,
-          descripcion: data.descripcion || "",
-          precio: data.precio,
-          stock: data.stock,
-          tipo: data.tipo || "",
-          categoria_id: data.categoria_id,
+          nombre: data.nombre ?? "",
+          descripcion: data.descripcion ?? "",
+          precio: data.precio ?? "",
+          stock: data.stock ?? "",
+          tipo: data.tipo ?? "",
+          categoria_id: data.categoria_id ?? null,
           estado: (data.estado as ProductoEstado) || "draft",
         });
       } else {
@@ -109,7 +123,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
     };
 
     fetchProducto();
-  }, [productoId]);
+  }, [productoId, empresaId]); // ✅ patch: agregar empresaId
 
   // ============================
   // 3) Handler inputs
@@ -156,12 +170,18 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
     if (productoId) {
       // update
-      const { error } = await supabase.from("producto").update(payload).eq("id", productoId);
+      const { error } = await supabase
+        .from("producto")
+        .update(payload)
+        .eq("id", productoId)
+        .eq("empresa_id", empresaId); // ✅ extra safety: no cross-tenant update
+
       if (error) {
         console.error("Error actualizando producto:", error);
         alert("Error guardando producto.");
         return { ok: false as const, id: null as string | null };
       }
+
       setForm((p) => ({ ...p, estado: estadoToSave }));
       return { ok: true as const, id: productoId };
     }
@@ -214,8 +234,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
     if (!res.ok) return;
 
-    // Si venías desde "Nuevo", dejá el form ya en edición (URL con id),
-    // así no se “pierde” el id en el estado del router.
+    // Si venías desde "Nuevo", dejá el form ya en edición (URL con id)
     if (!productoId && res.id) {
       router.replace(`/panel/productos/editar/${res.id}`);
       return;
@@ -361,9 +380,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
           className="border rounded w-full px-3 py-2"
           disabled={loadingCategorias}
         >
-          <option value="">
-            {loadingCategorias ? "Cargando..." : "Sin categoría"}
-          </option>
+          <option value="">{loadingCategorias ? "Cargando..." : "Sin categoría"}</option>
 
           {categorias.map((cat) => (
             <option key={cat.id} value={cat.id}>
@@ -386,3 +403,4 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 };
 
 export default ProductForm;
+
