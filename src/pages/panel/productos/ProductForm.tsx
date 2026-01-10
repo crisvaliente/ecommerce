@@ -6,6 +6,7 @@ import { useAuth } from "../../../context/AuthContext";
 type Categoria = {
   id: string;
   nombre: string;
+  empresa_id?: string; // opcional porque en el dropdown no lo traemos
 };
 
 type ProductoEstado = "draft" | "published";
@@ -17,11 +18,38 @@ type ProductoFormState = {
   stock: number | string;
   tipo: string;
   categoria_id: string | null;
-  estado: ProductoEstado; // ✅ B1
+  estado: ProductoEstado;
 };
 
 interface Props {
   productoId?: string;
+}
+
+// ===== Tipos para el fetch del producto (A3.1) =====
+type ProductoCategoriaRow = {
+  categoria: Categoria | Categoria[] | null;
+};
+
+type ProductoFetchRow = {
+  id: string;
+  nombre: string;
+  descripcion: string | null;
+  precio: number;
+  stock: number;
+  tipo: string | null;
+  categoria_id: string | null;
+  empresa_id: string;
+  estado: string | null;
+  producto_categoria: ProductoCategoriaRow[] | null;
+};
+
+function pickCategoria(raw: ProductoCategoriaRow["categoria"]): Categoria | null {
+  if (!raw) return null;
+  return Array.isArray(raw) ? raw[0] ?? null : raw;
+}
+
+function toProductoEstado(v: string | null | undefined): ProductoEstado {
+  return v === "published" ? "published" : "draft";
 }
 
 const ProductForm: React.FC<Props> = ({ productoId }) => {
@@ -43,14 +71,20 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
     stock: "",
     tipo: "",
     categoria_id: null,
-    estado: "draft", // ✅ por defecto, nuevo producto arranca como borrador
+    estado: "draft",
   });
 
   const badge = useMemo(() => {
     if (form.estado === "published") {
-      return { label: "Publicado", cls: "bg-emerald-600/20 text-emerald-200 border-emerald-500/40" };
+      return {
+        label: "Publicado",
+        cls: "bg-emerald-600/20 text-emerald-200 border-emerald-500/40",
+      };
     }
-    return { label: "Borrador", cls: "bg-amber-600/20 text-amber-200 border-amber-500/40" };
+    return {
+      label: "Borrador",
+      cls: "bg-amber-600/20 text-amber-200 border-amber-500/40",
+    };
   }, [form.estado]);
 
   // ============================
@@ -69,7 +103,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
         .eq("empresa_id", empresaId)
         .order("nombre", { ascending: true });
 
-      if (!error && data) setCategorias(data);
+      if (!error && data) setCategorias(data as Categoria[]);
       else console.error("Error cargando categorías:", error);
 
       setLoadingCategorias(false);
@@ -80,6 +114,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
   // ============================
   // 2) Si edición → cargar producto (incluye estado)
+  //    A3.1: bridge-first + fallback a legacy
   // ============================
   useEffect(() => {
     if (!productoId) return;
@@ -87,19 +122,44 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
     const fetchProducto = async () => {
       const { data, error } = await supabase
         .from("producto")
-        .select("*")
+        .select(
+          `
+          id,
+          nombre,
+          descripcion,
+          precio,
+          stock,
+          tipo,
+          categoria_id,
+          empresa_id,
+          estado,
+          producto_categoria:producto_categoria (
+            categoria:categoria (
+              id,
+              empresa_id,
+              nombre
+            )
+          )
+        `
+        )
         .eq("id", productoId)
-        .single();
+        .single<ProductoFetchRow>();
 
       if (!error && data) {
+        const pc0 = data.producto_categoria?.[0] ?? null;
+        const cat = pc0 ? pickCategoria(pc0.categoria) : null;
+
+        const bridgeCatId =
+          cat?.empresa_id && empresaId && cat.empresa_id === empresaId ? cat.id : null;
+
         setForm({
           nombre: data.nombre,
           descripcion: data.descripcion || "",
           precio: data.precio,
           stock: data.stock,
           tipo: data.tipo || "",
-          categoria_id: data.categoria_id,
-          estado: (data.estado as ProductoEstado) || "draft",
+          categoria_id: bridgeCatId ?? data.categoria_id,
+          estado: toProductoEstado(data.estado),
         });
       } else {
         console.error("Error cargando producto:", error);
@@ -109,7 +169,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
     };
 
     fetchProducto();
-  }, [productoId]);
+  }, [productoId, empresaId]);
 
   // ============================
   // 3) Handler inputs
@@ -134,7 +194,6 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
       return { ok: false as const, id: null as string | null };
     }
 
-    // Validaciones mínimas (por si publicás directo)
     if (!form.nombre.trim()) {
       alert("El nombre es obligatorio.");
       return { ok: false as const, id: null as string | null };
@@ -149,13 +208,12 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
       precio: Number(form.precio),
       stock: Number(form.stock),
       tipo: form.tipo || null,
-      categoria_id: form.categoria_id,
+      categoria_id: form.categoria_id, // legacy (A3.1: escrituras al bridge vienen después)
       empresa_id: empresaId,
-      estado: estadoToSave, // ✅ B1
+      estado: estadoToSave,
     };
 
     if (productoId) {
-      // update
       const { error } = await supabase.from("producto").update(payload).eq("id", productoId);
       if (error) {
         console.error("Error actualizando producto:", error);
@@ -166,12 +224,11 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
       return { ok: true as const, id: productoId };
     }
 
-    // insert (necesitamos el id devuelto para “crear y publicar”)
     const { data, error } = await supabase
       .from("producto")
       .insert(payload)
       .select("id, estado")
-      .single();
+      .single<{ id: string; estado: string | null }>();
 
     if (error || !data) {
       console.error("Error creando producto:", error);
@@ -179,8 +236,8 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
       return { ok: false as const, id: null as string | null };
     }
 
-    setForm((p) => ({ ...p, estado: (data.estado as ProductoEstado) || estadoToSave }));
-    return { ok: true as const, id: data.id as string };
+    setForm((p) => ({ ...p, estado: toProductoEstado(data.estado) }));
+    return { ok: true as const, id: data.id };
   };
 
   // ============================
@@ -195,7 +252,6 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
     if (!res.ok) return;
 
-    // ✅ vuelve al listado; el listado debería mostrar estado/badges
     router.push("/panel/productos");
   };
 
@@ -206,16 +262,11 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
     if (transitioning || saving) return;
 
     setTransitioning(true);
-
-    // Si no existe aún, crea y publica en un paso
     const res = await saveProducto("published");
-
     setTransitioning(false);
 
     if (!res.ok) return;
 
-    // Si venías desde "Nuevo", dejá el form ya en edición (URL con id),
-    // así no se “pierde” el id en el estado del router.
     if (!productoId && res.id) {
       router.replace(`/panel/productos/editar/${res.id}`);
       return;
@@ -224,7 +275,6 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
   const handleDraft = async () => {
     if (!productoId) {
-      // nuevo sin guardar ya es draft
       setForm((p) => ({ ...p, estado: "draft" }));
       return;
     }
@@ -361,9 +411,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
           className="border rounded w-full px-3 py-2"
           disabled={loadingCategorias}
         >
-          <option value="">
-            {loadingCategorias ? "Cargando..." : "Sin categoría"}
-          </option>
+          <option value="">{loadingCategorias ? "Cargando..." : "Sin categoría"}</option>
 
           {categorias.map((cat) => (
             <option key={cat.id} value={cat.id}>
