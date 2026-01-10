@@ -63,7 +63,6 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   const [saving, setSaving] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
 
-  // ✅ si estamos editando, arrancamos en “cargando producto”
   const [loadingProducto, setLoadingProducto] = useState(!!productoId);
 
   const [form, setForm] = useState<ProductoFormState>({
@@ -119,32 +118,34 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   // ============================
   useEffect(() => {
     if (!productoId) return;
-    if (!empresaId) return; // ✅ evita pedir el producto sin tenancy (RLS/0 rows)
+    if (!empresaId) return;
 
     const fetchProducto = async () => {
       setLoadingProducto(true);
 
+      // ✅ Tipado fuerte + sin any + select explícito
       const { data, error } = await supabase
         .from("producto")
-        .select("*")
+        .select(
+          "id,nombre,descripcion,precio,stock,tipo,categoria_id,empresa_id,estado,producto_categoria(categoria(id,nombre,empresa_id))"
+        )
         .eq("id", productoId)
-        .single();
+        .eq("empresa_id", empresaId)
+        .single<ProductoFetchRow>();
 
       if (!error && data) {
+        // bridge-first (solo lectura). si no hay rows, cae a categoria_id legacy.
         const pc0 = data.producto_categoria?.[0] ?? null;
         const cat = pc0 ? pickCategoria(pc0.categoria) : null;
 
-        const bridgeCatId =
-          cat?.empresa_id && empresaId && cat.empresa_id === empresaId ? cat.id : null;
-
         setForm({
-          nombre: data.nombre,
-          descripcion: data.descripcion || "",
-          precio: data.precio,
-          stock: data.stock,
-          tipo: data.tipo || "",
-          categoria_id: data.categoria_id,
-          estado: (data.estado as ProductoEstado) || "draft",
+          nombre: data.nombre ?? "",
+          descripcion: data.descripcion ?? "",
+          precio: data.precio ?? "",
+          stock: data.stock ?? "",
+          tipo: data.tipo ?? "",
+          categoria_id: cat?.id ?? data.categoria_id ?? null,
+          estado: toProductoEstado(data.estado),
         });
       } else {
         console.error("Error cargando producto:", error);
@@ -154,7 +155,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
     };
 
     fetchProducto();
-  }, [productoId]);
+  }, [productoId, empresaId]);
 
   // ============================
   // 3) Handler inputs
@@ -193,14 +194,18 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
       precio: Number(form.precio),
       stock: Number(form.stock),
       tipo: form.tipo || null,
-      categoria_id: form.categoria_id, // legacy (A3.1: escrituras al bridge vienen después)
+      categoria_id: form.categoria_id, // legacy write
       empresa_id: empresaId,
       estado: estadoToSave,
     };
 
     if (productoId) {
-      // update
-      const { error } = await supabase.from("producto").update(payload).eq("id", productoId);
+      const { error } = await supabase
+        .from("producto")
+        .update(payload)
+        .eq("id", productoId)
+        .eq("empresa_id", empresaId);
+
       if (error) {
         console.error("Error actualizando producto:", error);
         alert("Error guardando producto.");
@@ -228,7 +233,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   };
 
   // ============================
-  // 4) Guardar normal (no cambia estado)
+  // 4) Guardar normal
   // ============================
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -243,7 +248,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   };
 
   // ============================
-  // 5) Transiciones de estado (Publicar / Borrador)
+  // 5) Transiciones de estado
   // ============================
   const handlePublish = async () => {
     if (transitioning || saving) return;
@@ -254,8 +259,6 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
     if (!res.ok) return;
 
-    // Si venías desde "Nuevo", dejá el form ya en edición (URL con id),
-    // así no se “pierde” el id en el estado del router.
     if (!productoId && res.id) {
       router.replace(`/panel/productos/editar/${res.id}`);
       return;
@@ -423,4 +426,3 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 };
 
 export default ProductForm;
-
