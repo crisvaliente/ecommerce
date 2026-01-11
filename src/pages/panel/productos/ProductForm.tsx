@@ -6,7 +6,7 @@ import { useAuth } from "../../../context/AuthContext";
 type Categoria = {
   id: string;
   nombre: string;
-  empresa_id?: string; // opcional porque en el dropdown no lo traemos
+  empresa_id?: string;
 };
 
 type ProductoEstado = "draft" | "published";
@@ -15,7 +15,7 @@ type ProductoFormState = {
   nombre: string;
   descripcion: string;
   precio: number | string;
-  stock: number | string;
+  stock: number | string; // legacy (solo si NO usa variantes)
   tipo: string;
   categoria_id: string | null;
   estado: ProductoEstado;
@@ -30,7 +30,7 @@ type ProductoCategoriaRow = {
   categoria: Categoria | Categoria[] | null;
 };
 
-type ProductoFetchRow = {
+type ProductoRow = {
   id: string;
   nombre: string;
   descripcion: string | null;
@@ -42,6 +42,7 @@ type ProductoFetchRow = {
   estado: string | null;
   producto_categoria: ProductoCategoriaRow[] | null;
 };
+
 
 function pickCategoria(raw: ProductoCategoriaRow["categoria"]): Categoria | null {
   if (!raw) return null;
@@ -64,6 +65,10 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   const [transitioning, setTransitioning] = useState(false);
 
   const [loadingProducto, setLoadingProducto] = useState(!!productoId);
+
+  // ✅ flags stock real
+  const [usaVariantes, setUsaVariantes] = useState(false);
+  const [stockTotal, setStockTotal] = useState<number | null>(null);
 
   const [form, setForm] = useState<ProductoFormState>({
     nombre: "",
@@ -114,7 +119,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   }, [empresaId]);
 
   // ============================
-  // 2) Si edición → cargar producto (incluye estado)
+  // 2) Si edición → cargar producto + resumen stock (2 queries)
   // ============================
   useEffect(() => {
     if (!productoId) return;
@@ -123,7 +128,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
     const fetchProducto = async () => {
       setLoadingProducto(true);
 
-      // ✅ Tipado fuerte + sin any + select explícito
+      // A) producto (sin view)
       const { data, error } = await supabase
         .from("producto")
         .select(
@@ -131,25 +136,45 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
         )
         .eq("id", productoId)
         .eq("empresa_id", empresaId)
-        .single<ProductoFetchRow>();
+        .single<ProductoRow>();
 
-      if (!error && data) {
-        // bridge-first (solo lectura). si no hay rows, cae a categoria_id legacy.
-        const pc0 = data.producto_categoria?.[0] ?? null;
-        const cat = pc0 ? pickCategoria(pc0.categoria) : null;
-
-        setForm({
-          nombre: data.nombre ?? "",
-          descripcion: data.descripcion ?? "",
-          precio: data.precio ?? "",
-          stock: data.stock ?? "",
-          tipo: data.tipo ?? "",
-          categoria_id: cat?.id ?? data.categoria_id ?? null,
-          estado: toProductoEstado(data.estado),
-        });
-      } else {
+      if (error || !data) {
         console.error("Error cargando producto:", error);
+        setLoadingProducto(false);
+        return;
       }
+
+      // B) resumen stock (view) por separado
+      const { data: resumen, error: resumenError } = await supabase
+        .from("producto_stock_resumen")
+        .select("stock_total, usa_variantes")
+        .eq("empresa_id", empresaId)
+        .eq("producto_id", productoId)
+        .maybeSingle<{ stock_total: number; usa_variantes: boolean }>();
+
+      if (resumenError) {
+        console.warn("[producto] resumen warning:", resumenError);
+      }
+
+      const _usaVariantes = Boolean(resumen?.usa_variantes);
+      const _stockTotal = typeof resumen?.stock_total === "number" ? resumen.stock_total : null;
+
+      setUsaVariantes(_usaVariantes);
+      setStockTotal(_stockTotal);
+
+      // bridge-first: si no hay rows en puente, cae a legacy categoria_id
+      const pc0 = data.producto_categoria?.[0] ?? null;
+      const cat = pc0 ? pickCategoria(pc0.categoria) : null;
+
+      setForm({
+        nombre: data.nombre ?? "",
+        descripcion: data.descripcion ?? "",
+        precio: data.precio ?? "",
+        stock: data.stock ?? "",
+        tipo: data.tipo ?? "",
+        categoria_id: cat?.id ?? data.categoria_id ?? null,
+        estado: toProductoEstado(data.estado),
+      });
 
       setLoadingProducto(false);
     };
@@ -187,17 +212,23 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
     const estadoToSave = overrideEstado ?? form.estado;
 
-    const payload = {
+    // ✅ Regla: si usa variantes, NO tocamos producto.stock (legacy fallback)
+    const shouldWriteLegacyStock = !usaVariantes;
+
+    const basePayload = {
       ...(productoId ? { id: productoId } : {}),
       nombre: form.nombre,
       descripcion: form.descripcion || null,
       precio: Number(form.precio),
-      stock: Number(form.stock),
       tipo: form.tipo || null,
       categoria_id: form.categoria_id, // legacy write
       empresa_id: empresaId,
       estado: estadoToSave,
     };
+
+    const payload = shouldWriteLegacyStock
+      ? { ...basePayload, stock: Number(form.stock) }
+      : basePayload;
 
     if (productoId) {
       const { error } = await supabase
@@ -260,7 +291,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
     if (!res.ok) return;
 
     if (!productoId && res.id) {
-      router.replace(`/panel/productos/editar/${res.id}`);
+      router.replace(`/panel/productos/${res.id}`);
       return;
     }
   };
@@ -284,6 +315,8 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
     return <div className="p-4">Cargando producto...</div>;
   }
 
+  const showStockLegacyInput = !usaVariantes;
+
   return (
     <form onSubmit={handleSubmit} className="space-y-5 p-4">
       {/* Header estado */}
@@ -305,6 +338,31 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
               Este producto está <b>publicado</b>. Se considera visible en la tienda.
             </div>
           )}
+
+          {/* Resumen stock */}
+          <div className="mt-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium text-white/90">Stock total:</span>
+              <span className="font-semibold text-white">
+                {typeof stockTotal === "number" ? stockTotal : "—"}
+              </span>
+              {usaVariantes ? (
+                <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-100">
+                  calculado por variantes
+                </span>
+              ) : (
+                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-xs text-white/70">
+                  stock simple (legacy)
+                </span>
+              )}
+            </div>
+
+            {usaVariantes && (
+              <div className="mt-1 text-xs text-white/60">
+                El stock se gestiona por talle. El stock simple se oculta para evitar inconsistencias.
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Acciones de estado */}
@@ -368,18 +426,23 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
         />
       </div>
 
-      {/* Stock */}
-      <div>
-        <label className="block font-medium">Stock</label>
-        <input
-          type="number"
-          name="stock"
-          className="border rounded w-full px-3 py-2"
-          value={form.stock}
-          onChange={handleChange}
-          required
-        />
-      </div>
+      {/* Stock legacy (solo si NO usa variantes) */}
+      {showStockLegacyInput && (
+        <div>
+          <label className="block font-medium">Stock</label>
+          <input
+            type="number"
+            name="stock"
+            className="border rounded w-full px-3 py-2"
+            value={form.stock}
+            onChange={handleChange}
+            required
+          />
+          <div className="mt-1 text-xs text-neutral-600">
+            Stock simple (solo aplica si el producto no usa variantes).
+          </div>
+        </div>
+      )}
 
       {/* Tipo */}
       <div>

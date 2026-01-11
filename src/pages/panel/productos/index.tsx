@@ -5,21 +5,37 @@ import { supabase } from "../../../lib/supabaseClient";
 import Link from "next/link";
 
 type ProductoEstado = "draft" | "published";
+type FiltroEstado = "all" | "published" | "draft";
 
-type Producto = {
+type ProductoUI = {
   id: string;
   nombre: string;
-  descripcion?: string | null;
+  descripcion: string | null;
   precio: number;
   estado: ProductoEstado;
+  stockTotal: number;
+  usaVariantes: boolean;
 };
 
-type FiltroEstado = "all" | "published" | "draft";
+type ProductoRow = {
+  id: string;
+  nombre: string;
+  descripcion: string | null;
+  precio: number;
+  estado: ProductoEstado;
+  stock: number | null; // legacy fallback
+};
+
+type StockResumenRow = {
+  producto_id: string;
+  stock_total: number;
+  usa_variantes: boolean;
+};
 
 const ProductosPage: React.FC = () => {
   const { dbUser } = useAuth();
 
-  const [productos, setProductos] = useState<Producto[]>([]);
+  const [productos, setProductos] = useState<ProductoUI[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -34,20 +50,58 @@ const ProductosPage: React.FC = () => {
           return;
         }
 
-        const { data, error } = await supabase
+        // 1) Productos (tabla base)
+        const { data: productosData, error: productosError } = await supabase
           .from("producto")
-          .select("id, nombre, descripcion, precio, estado")
+          .select("id, nombre, descripcion, precio, estado, stock")
           .eq("empresa_id", dbUser.empresa_id)
-          .order("nombre", { ascending: true });
+          .order("nombre", { ascending: true })
+          .returns<ProductoRow[]>();
 
-          console.log("[productos] data:", data); 
-
-        if (error) {
-          console.error("[productos] error:", error);
+        if (productosError) {
+          console.error("[productos] error:", productosError);
           setErrorMsg("No se pudieron cargar los productos.");
-        } else {
-          setProductos((data as Producto[]) ?? []);
+          setProductos([]);
+          return;
         }
+
+        // 2) Resumen de stock (view). Si falla, seguimos con fallback a producto.stock.
+        const { data: resumenData, error: resumenError } = await supabase
+          .from("producto_stock_resumen")
+          .select("producto_id, stock_total, usa_variantes")
+          .eq("empresa_id", dbUser.empresa_id)
+          .returns<StockResumenRow[]>();
+
+        if (resumenError) {
+          console.warn("[productos] resumen warning:", resumenError);
+        }
+
+        const resumenMap = new Map<string, StockResumenRow>(
+          (resumenData ?? []).map((r) => [r.producto_id, r])
+        );
+
+        const ui: ProductoUI[] = (productosData ?? []).map((p) => {
+          const r = resumenMap.get(p.id);
+
+          const stockTotal =
+            typeof r?.stock_total === "number"
+              ? r.stock_total
+              : typeof p.stock === "number"
+              ? p.stock
+              : 0;
+
+          return {
+            id: p.id,
+            nombre: p.nombre,
+            descripcion: p.descripcion,
+            precio: Number(p.precio),
+            estado: p.estado,
+            stockTotal,
+            usaVariantes: Boolean(r?.usa_variantes),
+          };
+        });
+
+        setProductos(ui);
       } catch (err) {
         console.error(err);
         setErrorMsg("Ocurrió un error al cargar los productos.");
@@ -104,14 +158,21 @@ const ProductosPage: React.FC = () => {
     );
   };
 
+  const renderVariantesBadge = (usaVariantes: boolean) => {
+    if (!usaVariantes) return null;
+    return (
+      <span className="ml-2 inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] font-medium text-slate-200">
+        Variantes
+      </span>
+    );
+  };
+
   return (
     <AdminLayout>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Productos</h1>
-          <p className="text-sm text-slate-300">
-            Gestioná los productos de tu tienda.
-          </p>
+          <p className="text-sm text-slate-300">Gestioná los productos de tu tienda.</p>
         </div>
 
         <div className="flex items-center gap-3">
@@ -135,18 +196,12 @@ const ProductosPage: React.FC = () => {
         </div>
       </div>
 
-      {loading && (
-        <p className="text-sm text-slate-300">Cargando productos…</p>
-      )}
+      {loading && <p className="text-sm text-slate-300">Cargando productos…</p>}
 
-      {errorMsg && !loading && (
-        <p className="mb-3 text-sm text-rose-400">{errorMsg}</p>
-      )}
+      {errorMsg && !loading && <p className="mb-3 text-sm text-rose-400">{errorMsg}</p>}
 
       {!loading && !errorMsg && productosFiltrados.length === 0 && (
-        <p className="text-sm text-slate-400">
-          No hay productos para el filtro seleccionado.
-        </p>
+        <p className="text-sm text-slate-400">No hay productos para el filtro seleccionado.</p>
       )}
 
       {!loading && productosFiltrados.length > 0 && (
@@ -154,25 +209,21 @@ const ProductosPage: React.FC = () => {
           <table className="min-w-full text-sm">
             <thead className="bg-slate-900/60">
               <tr>
-                <th className="px-4 py-2 text-left font-medium text-slate-300">
-                  Nombre
-                </th>
-                <th className="px-4 py-2 text-left font-medium text-slate-300">
-                  Precio
-                </th>
-                <th className="px-4 py-2 text-left font-medium text-slate-300">
-                  Estado
-                </th>
-                <th className="px-4 py-2 text-right font-medium text-slate-300">
-                  Acciones
-                </th>
+                <th className="px-4 py-2 text-left font-medium text-slate-300">Nombre</th>
+                <th className="px-4 py-2 text-left font-medium text-slate-300">Precio</th>
+                <th className="px-4 py-2 text-left font-medium text-slate-300">Stock</th>
+                <th className="px-4 py-2 text-left font-medium text-slate-300">Estado</th>
+                <th className="px-4 py-2 text-right font-medium text-slate-300">Acciones</th>
               </tr>
             </thead>
 
             <tbody>
               {productosFiltrados.map((p) => (
                 <tr key={p.id} className="border-t border-slate-800">
-                  <td className="px-4 py-2">{p.nombre}</td>
+                  <td className="px-4 py-2">
+                    {p.nombre}
+                    {renderVariantesBadge(p.usaVariantes)}
+                  </td>
 
                   <td className="px-4 py-2">
                     {Number(p.precio).toLocaleString("es-UY", {
@@ -182,8 +233,12 @@ const ProductosPage: React.FC = () => {
                   </td>
 
                   <td className="px-4 py-2">
-                    {renderEstadoBadge(p.estado)}
+                    <span className={p.stockTotal <= 0 ? "text-rose-300" : "text-slate-200"}>
+                      {p.stockTotal}
+                    </span>
                   </td>
+
+                  <td className="px-4 py-2">{renderEstadoBadge(p.estado)}</td>
 
                   <td className="px-4 py-2 text-right">
                     <div className="inline-flex items-center gap-3">

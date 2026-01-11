@@ -20,15 +20,16 @@ const EditarProductoPage: React.FC = () => {
     );
   }
 
+  const hasEmpresa = Boolean(dbUser?.empresa_id);
+
   return (
     <AdminLayout>
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Editar producto</h1>
-          <p className="text-sm text-slate-300">
-            Actualizá los datos del producto.
-          </p>
+          <p className="text-sm text-slate-300">Actualizá los datos del producto.</p>
         </div>
+
         <button
           onClick={goBackToList}
           className="rounded-lg border border-slate-600 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800"
@@ -37,17 +38,19 @@ const EditarProductoPage: React.FC = () => {
         </button>
       </div>
 
-      {!dbUser?.empresa_id && (
+      {!hasEmpresa && (
         <p className="mb-4 text-sm text-rose-400">
-          No se encontró una empresa asociada a tu usuario. Volvé al inicio y
-          seleccioná una empresa válida.
+          No se encontró una empresa asociada a tu usuario. Volvé al inicio y seleccioná una
+          empresa válida.
         </p>
       )}
 
       {/* ProductForm se encarga de cargar el producto, manejar estado y guardar */}
-      <div className="max-w-lg rounded-xl border border-slate-800 bg-slate-950/40">
-        <ProductForm productoId={id} />
-      </div>
+      {hasEmpresa && (
+        <div className="max-w-lg rounded-xl border border-slate-800 bg-slate-950/40">
+          <ProductForm productoId={id} />
+        </div>
+      )}
     </AdminLayout>
   );
 };
