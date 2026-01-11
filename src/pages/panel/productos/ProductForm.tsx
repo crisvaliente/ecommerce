@@ -43,7 +43,6 @@ type ProductoRow = {
   producto_categoria: ProductoCategoriaRow[] | null;
 };
 
-
 function pickCategoria(raw: ProductoCategoriaRow["categoria"]): Categoria | null {
   if (!raw) return null;
   return Array.isArray(raw) ? raw[0] ?? null : raw;
@@ -52,6 +51,25 @@ function pickCategoria(raw: ProductoCategoriaRow["categoria"]): Categoria | null
 function toProductoEstado(v: string | null | undefined): ProductoEstado {
   return v === "published" ? "published" : "draft";
 }
+
+// ===== Variantes (schema real) =====
+type ProductoVariante = {
+  id: string;
+  empresa_id: string;
+  producto_id: string;
+  talle: string;
+  stock: number;
+  activo: boolean;
+  creado_en: string | null;
+  updated_at: string | null;
+};
+
+type VarianteFormState = {
+  id?: string;
+  nombre: string; // UI label (en DB es talle)
+  stock: number | string;
+  activo: boolean;
+};
 
 const ProductForm: React.FC<Props> = ({ productoId }) => {
   const router = useRouter();
@@ -94,6 +112,77 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   }, [form.estado]);
 
   // ============================
+  // Variantes state
+  // ============================
+  const [variantes, setVariantes] = useState<ProductoVariante[]>([]);
+  const [loadingVariantes, setLoadingVariantes] = useState(false);
+
+  const [varModalOpen, setVarModalOpen] = useState(false);
+  const [varSaving, setVarSaving] = useState(false);
+  const [varEditingId, setVarEditingId] = useState<string | null>(null);
+
+  const [varForm, setVarForm] = useState<VarianteFormState>({
+    nombre: "",
+    stock: "",
+    activo: true,
+  });
+
+  const [switchingToVariantes, setSwitchingToVariantes] = useState(false);
+
+  // ============================
+  // Helpers stock resumen
+  // ============================
+  const fetchResumenStock = async () => {
+    if (!productoId) return;
+    if (!empresaId) return;
+
+    const { data: resumen, error: resumenError } = await supabase
+      .from("producto_stock_resumen")
+      .select("stock_total, usa_variantes")
+      .eq("empresa_id", empresaId)
+      .eq("producto_id", productoId)
+      .maybeSingle<{ stock_total: number; usa_variantes: boolean }>();
+
+    if (resumenError) {
+      console.warn("[producto] resumen warning:", resumenError);
+    }
+
+    const _usaVariantes = Boolean(resumen?.usa_variantes);
+    const _stockTotal =
+      typeof resumen?.stock_total === "number" ? resumen.stock_total : null;
+
+    setUsaVariantes(_usaVariantes);
+    setStockTotal(_stockTotal);
+  };
+
+  // ============================
+  // Variantes: fetch list
+  // ============================
+  const fetchVariantes = async () => {
+    if (!productoId) return;
+    if (!empresaId) return;
+
+    setLoadingVariantes(true);
+
+    const { data, error } = await supabase
+      .from("producto_variante")
+      .select("id, empresa_id, producto_id, talle, stock, activo, creado_en, updated_at")
+      .eq("producto_id", productoId)
+      .eq("empresa_id", empresaId)
+      .order("talle", { ascending: true })
+      .order("creado_en", { ascending: true });
+
+    if (error) {
+      console.error("Error cargando variantes:", error);
+      setVariantes([]);
+    } else {
+      setVariantes((data ?? []) as ProductoVariante[]);
+    }
+
+    setLoadingVariantes(false);
+  };
+
+  // ============================
   // 1) Traer categorías
   // ============================
   useEffect(() => {
@@ -119,7 +208,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   }, [empresaId]);
 
   // ============================
-  // 2) Si edición → cargar producto + resumen stock (2 queries)
+  // 2) Si edición → cargar producto + resumen stock
   // ============================
   useEffect(() => {
     if (!productoId) return;
@@ -157,7 +246,8 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
       }
 
       const _usaVariantes = Boolean(resumen?.usa_variantes);
-      const _stockTotal = typeof resumen?.stock_total === "number" ? resumen.stock_total : null;
+      const _stockTotal =
+        typeof resumen?.stock_total === "number" ? resumen.stock_total : null;
 
       setUsaVariantes(_usaVariantes);
       setStockTotal(_stockTotal);
@@ -183,7 +273,22 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   }, [productoId, empresaId]);
 
   // ============================
-  // 3) Handler inputs
+  // 2.1) Si usa_variantes=true → traer variantes
+  // ============================
+  useEffect(() => {
+    if (!productoId) return;
+    if (!empresaId) return;
+
+    if (usaVariantes) {
+      fetchVariantes();
+    } else {
+      setVariantes([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productoId, empresaId, usaVariantes]);
+
+  // ============================
+  // 3) Handler inputs producto
   // ============================
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
@@ -197,7 +302,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   };
 
   // ============================
-  // Helpers: guardar (sin cambiar estado)
+  // Helpers: guardar producto (sin cambiar estado)
   // ============================
   const saveProducto = async (overrideEstado?: ProductoEstado) => {
     if (!empresaId) {
@@ -311,6 +416,172 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
     if (!res.ok) return;
   };
 
+  // ============================
+  // Variantes: modal helpers
+  // ============================
+  const openCreateVariante = () => {
+    setVarEditingId(null);
+    setVarForm({ nombre: "", stock: "", activo: true });
+    setVarModalOpen(true);
+  };
+
+  const openEditVariante = (v: ProductoVariante) => {
+    setVarEditingId(v.id);
+    setVarForm({
+      id: v.id,
+      nombre: v.talle ?? "",
+      stock: typeof v.stock === "number" ? v.stock : "",
+      activo: !!v.activo,
+    });
+    setVarModalOpen(true);
+  };
+
+  const closeVarianteModal = () => {
+    if (varSaving) return;
+    setVarModalOpen(false);
+  };
+
+  const handleVarFormChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value, type, checked } = e.target as HTMLInputElement;
+
+    setVarForm((prev) => ({
+      ...prev,
+      [name]: type === "checkbox" ? checked : value,
+    }));
+  };
+
+  const saveVariante = async () => {
+    if (!productoId) return;
+    if (!empresaId) return;
+
+    if (!varForm.nombre.trim()) {
+      alert("El talle es obligatorio.");
+      return;
+    }
+
+    setVarSaving(true);
+
+    const payload = {
+      empresa_id: empresaId,
+      producto_id: productoId,
+      talle: varForm.nombre.trim(),
+      stock: Number(varForm.stock) || 0,
+      activo: !!varForm.activo,
+    };
+
+    if (varEditingId) {
+      const { error } = await supabase
+        .from("producto_variante")
+        .update(payload)
+        .eq("id", varEditingId)
+        .eq("empresa_id", empresaId);
+
+      if (error) {
+        console.error("Error actualizando variante:", error);
+        alert("Error guardando variante.");
+        setVarSaving(false);
+        return;
+      }
+    } else {
+      const { error } = await supabase.from("producto_variante").insert(payload);
+
+      if (error) {
+        console.error("Error creando variante:", error);
+        alert("Error creando variante.");
+        setVarSaving(false);
+        return;
+      }
+    }
+
+    await fetchVariantes();
+    await fetchResumenStock();
+
+    setVarSaving(false);
+    setVarModalOpen(false);
+  };
+
+  const toggleVarianteActivo = async (v: ProductoVariante) => {
+    if (!productoId) return;
+    if (!empresaId) return;
+
+    const nextActivo = !v.activo;
+
+    const { error } = await supabase
+      .from("producto_variante")
+      .update({ activo: nextActivo })
+      .eq("id", v.id)
+      .eq("empresa_id", empresaId);
+
+    if (error) {
+      console.error("Error toggling activo:", error);
+      alert("No se pudo actualizar el estado.");
+      return;
+    }
+
+    setVariantes((prev) => prev.map((x) => (x.id === v.id ? { ...x, activo: nextActivo } : x)));
+    await fetchResumenStock();
+  };
+
+  const deleteVariante = async (v: ProductoVariante) => {
+    if (!productoId) return;
+    if (!empresaId) return;
+
+    const ok = confirm(`¿Eliminar variante "${v.talle}"?`);
+    if (!ok) return;
+
+    const { error } = await supabase
+      .from("producto_variante")
+      .delete()
+      .eq("id", v.id)
+      .eq("empresa_id", empresaId);
+
+    if (error) {
+      console.error("Error eliminando variante:", error);
+      alert("No se pudo eliminar la variante.");
+      return;
+    }
+
+    setVariantes((prev) => prev.filter((x) => x.id !== v.id));
+    await fetchResumenStock();
+  };
+
+  // ============================
+  // UX transición: Pasar a variantes
+  // ============================
+  const handlePasarAVariantes = async () => {
+    if (!productoId) {
+      alert("Primero creá el producto para poder activar variantes.");
+      return;
+    }
+    if (!empresaId) return;
+
+    const ok = confirm(
+      "¿Pasar a modo variantes? El stock simple quedará como fallback legacy y el stock real se gestionará en variantes."
+    );
+    if (!ok) return;
+
+    setSwitchingToVariantes(true);
+
+    const { error } = await supabase
+      .from("producto")
+      .update({ usa_variantes: true })
+      .eq("id", productoId)
+      .eq("empresa_id", empresaId);
+
+    if (error) {
+      console.error("Error pasando a variantes:", error);
+      alert("No se pudo activar el modo variantes.");
+      setSwitchingToVariantes(false);
+      return;
+    }
+
+    await fetchResumenStock();
+    setUsaVariantes(true);
+    await fetchVariantes();
+
+    setSwitchingToVariantes(false);
+  };
+
   if (loadingProducto) {
     return <div className="p-4">Cargando producto...</div>;
   }
@@ -359,7 +630,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
             {usaVariantes && (
               <div className="mt-1 text-xs text-white/60">
-                El stock se gestiona por talle. El stock simple se oculta para evitar inconsistencias.
+                Nota: en Camino A el stock total suma existencias aunque la variante esté inactiva.
               </div>
             )}
           </div>
@@ -428,18 +699,38 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
       {/* Stock legacy (solo si NO usa variantes) */}
       {showStockLegacyInput && (
-        <div>
-          <label className="block font-medium">Stock</label>
-          <input
-            type="number"
-            name="stock"
-            className="border rounded w-full px-3 py-2"
-            value={form.stock}
-            onChange={handleChange}
-            required
-          />
-          <div className="mt-1 text-xs text-neutral-600">
-            Stock simple (solo aplica si el producto no usa variantes).
+        <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="font-medium text-white/90">Modo legacy</div>
+              <div className="text-xs text-white/60">
+                El stock simple aplica solo mientras <b>usa_variantes</b> sea false.
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handlePasarAVariantes}
+              disabled={!productoId || switchingToVariantes}
+              className="rounded-lg bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/15 disabled:opacity-60"
+              title={!productoId ? "Primero creá el producto" : "Pasar a modo variantes"}
+            >
+              {switchingToVariantes ? "Pasando..." : "Pasar a variantes"}
+            </button>
+          </div>
+
+          <div className="mt-3">
+            <label className="block font-medium">Stock</label>
+            <input
+              type="number"
+              name="stock"
+              className="border rounded w-full px-3 py-2"
+              value={form.stock}
+              onChange={handleChange}
+              required
+              min={0}
+            />
+            <div className="mt-1 text-xs text-white/60">Stock simple (legacy).</div>
           </div>
         </div>
       )}
@@ -475,6 +766,197 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
           ))}
         </select>
       </div>
+
+      {/* ============================
+          Variantes block (solo si usa_variantes)
+         ============================ */}
+      {usaVariantes && (
+        <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="font-medium text-white/90">Variantes</div>
+              <div className="text-xs text-white/60">
+                Gestioná stock real por talle/variante. (Camino A: stock total ignora activo)
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={fetchVariantes}
+                disabled={loadingVariantes}
+                className="rounded-lg bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/15 disabled:opacity-60"
+              >
+                {loadingVariantes ? "Cargando..." : "Refrescar"}
+              </button>
+
+              <button
+                type="button"
+                onClick={openCreateVariante}
+                disabled={!productoId}
+                className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-60"
+              >
+                Nueva variante
+              </button>
+            </div>
+          </div>
+
+          {!productoId && (
+            <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+              Guardá/creá el producto primero para poder agregar variantes.
+            </div>
+          )}
+
+          <div className="mt-3 overflow-x-auto">
+            <table className="min-w-full border-separate border-spacing-y-2 text-sm">
+              <thead className="text-white/70">
+                <tr>
+                  <th className="text-left font-medium">Talle</th>
+                  <th className="text-right font-medium">Stock</th>
+                  <th className="text-center font-medium">Activa</th>
+                  <th className="text-right font-medium">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loadingVariantes ? (
+                  <tr>
+                    <td colSpan={4} className="py-3 text-white/70">
+                      Cargando variantes...
+                    </td>
+                  </tr>
+                ) : variantes.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="py-3 text-white/70">
+                      No hay variantes todavía.
+                    </td>
+                  </tr>
+                ) : (
+                  variantes.map((v) => (
+                    <tr key={v.id} className="rounded-lg bg-white/5">
+                      <td className="px-2 py-2 text-white">{v.talle}</td>
+                      <td className="px-2 py-2 text-right text-white font-semibold">{v.stock}</td>
+                      <td className="px-2 py-2 text-center">
+                        <input
+                          type="checkbox"
+                          checked={!!v.activo}
+                          onChange={() => toggleVarianteActivo(v)}
+                          className="h-4 w-4"
+                        />
+                      </td>
+                      <td className="px-2 py-2 text-right">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openEditVariante(v)}
+                            className="rounded-lg bg-white/10 px-3 py-1.5 text-xs text-white hover:bg-white/15"
+                          >
+                            Editar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteVariante(v)}
+                            className="rounded-lg bg-red-500/15 px-3 py-1.5 text-xs text-red-100 hover:bg-red-500/25"
+                          >
+                            Eliminar
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Modal simple */}
+          {varModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+              <div className="w-full max-w-lg rounded-xl border border-white/10 bg-neutral-900 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-lg font-semibold text-white">
+                      {varEditingId ? "Editar variante" : "Nueva variante"}
+                    </div>
+                    <div className="text-xs text-white/60">
+                      El stock real vive en <b>producto_variante.stock</b>.
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={closeVarianteModal}
+                    className="rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white hover:bg-white/15"
+                    disabled={varSaving}
+                  >
+                    Cerrar
+                  </button>
+                </div>
+
+                <div className="mt-4 grid gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-white/90">Talle</label>
+                    <input
+                      name="nombre"
+                      value={varForm.nombre}
+                      onChange={handleVarFormChange}
+                      className="mt-1 w-full rounded border border-white/10 bg-white/5 px-3 py-2 text-white"
+                      placeholder="Ej: S / M / L"
+                      required
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-sm font-medium text-white/90">Stock</label>
+                      <input
+                        name="stock"
+                        type="number"
+                        min={0}
+                        value={varForm.stock}
+                        onChange={handleVarFormChange}
+                        className="mt-1 w-full rounded border border-white/10 bg-white/5 px-3 py-2 text-white"
+                      />
+                    </div>
+
+                    <div className="flex items-end gap-2">
+                      <input
+                        id="activo"
+                        name="activo"
+                        type="checkbox"
+                        checked={!!varForm.activo}
+                        onChange={handleVarFormChange}
+                        className="h-4 w-4"
+                      />
+                      <label htmlFor="activo" className="text-sm text-white/90">
+                        Activa
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="mt-2 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={closeVarianteModal}
+                      disabled={varSaving}
+                      className="rounded-lg bg-white/10 px-4 py-2 text-sm text-white hover:bg-white/15 disabled:opacity-60"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveVariante}
+                      disabled={varSaving}
+                      className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-60"
+                    >
+                      {varSaving ? "Guardando..." : "Guardar"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Guardar */}
       <button
