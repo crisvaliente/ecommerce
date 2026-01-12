@@ -98,6 +98,9 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
     estado: "draft",
   });
 
+  // ✅ Capa 2: opción /nuevo
+  const [crearEnModoVariantes, setCrearEnModoVariantes] = useState(false);
+
   const badge = useMemo(() => {
     if (form.estado === "published") {
       return {
@@ -166,7 +169,9 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
     const { data, error } = await supabase
       .from("producto_variante")
-      .select("id, empresa_id, producto_id, talle, stock, activo, creado_en, updated_at")
+      .select(
+        "id, empresa_id, producto_id, talle, stock, activo, creado_en, updated_at"
+      )
       .eq("producto_id", productoId)
       .eq("empresa_id", empresaId)
       .order("talle", { ascending: true })
@@ -291,7 +296,9 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   // 3) Handler inputs producto
   // ============================
   const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
+    e: React.ChangeEvent<
+      HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+    >
   ) => {
     const { name, value } = e.target;
 
@@ -369,6 +376,32 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   };
 
   // ============================
+  // Capa 2 helper: si se eligió "crear en modo variantes"
+  // ============================
+  const maybeSetUsaVariantesAfterCreate = async (newId: string) => {
+    // Solo aplica en /nuevo
+    if (productoId) return;
+
+    // Solo si el usuario lo marcó
+    if (!crearEnModoVariantes) return;
+
+    if (!empresaId) return;
+
+    const { error } = await supabase
+      .from("producto")
+      .update({ usa_variantes: true })
+      .eq("id", newId)
+      .eq("empresa_id", empresaId);
+
+    if (error) {
+      console.error("Error seteando usa_variantes post-create:", error);
+      alert(
+        "El producto se creó, pero no se pudo activar modo variantes automáticamente. Podés activarlo desde edición con 'Pasar a variantes'."
+      );
+    }
+  };
+
+  // ============================
   // 4) Guardar normal
   // ============================
   const handleSubmit = async (e: React.FormEvent) => {
@@ -380,7 +413,17 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
     if (!res.ok) return;
 
-    router.push("/panel/productos");
+    // ✅ Capa 1: si es create → ir a /panel/productos/<id>
+    if (!productoId && res.id) {
+      // ✅ Capa 2: si marcó "Crear en modo variantes" → update usa_variantes=true
+      await maybeSetUsaVariantesAfterCreate(res.id);
+
+      router.replace(`/panel/productos/${res.id}`);
+      return;
+    }
+
+    // Si es edición: nos quedamos en la pantalla.
+    // (Si querés sí o sí volver al listado, podés volver a poner router.push("/panel/productos") acá.)
   };
 
   // ============================
@@ -395,7 +438,9 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
     if (!res.ok) return;
 
+    // Si estamos en /nuevo y se publica al crear:
     if (!productoId && res.id) {
+      await maybeSetUsaVariantesAfterCreate(res.id);
       router.replace(`/panel/productos/${res.id}`);
       return;
     }
@@ -518,7 +563,9 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
       return;
     }
 
-    setVariantes((prev) => prev.map((x) => (x.id === v.id ? { ...x, activo: nextActivo } : x)));
+    setVariantes((prev) =>
+      prev.map((x) => (x.id === v.id ? { ...x, activo: nextActivo } : x))
+    );
     await fetchResumenStock();
   };
 
@@ -602,11 +649,13 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
           {form.estado === "draft" ? (
             <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
-              Este producto está en <b>borrador</b>. No debería mostrarse en la tienda hasta publicarlo.
+              Este producto está en <b>borrador</b>. No debería mostrarse en la
+              tienda hasta publicarlo.
             </div>
           ) : (
             <div className="mt-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
-              Este producto está <b>publicado</b>. Se considera visible en la tienda.
+              Este producto está <b>publicado</b>. Se considera visible en la
+              tienda.
             </div>
           )}
 
@@ -630,7 +679,8 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
             {usaVariantes && (
               <div className="mt-1 text-xs text-white/60">
-                Nota: en Camino A el stock total suma existencias aunque la variante esté inactiva.
+                Nota: en Camino A el stock total suma existencias aunque la
+                variante esté inactiva.
               </div>
             )}
           </div>
@@ -659,6 +709,27 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
           )}
         </div>
       </div>
+
+      {/* ✅ Capa 2 (solo /nuevo): opción "Crear en modo variantes" */}
+      {!productoId && (
+        <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+          <label className="flex items-start gap-3 text-sm text-white/90">
+            <input
+              type="checkbox"
+              className="mt-1 h-4 w-4"
+              checked={crearEnModoVariantes}
+              onChange={(e) => setCrearEnModoVariantes(e.target.checked)}
+            />
+            <span>
+              <span className="font-medium">Crear en modo variantes</span>
+              <span className="block text-xs text-white/60">
+                Al crear, se activará <b>usa_variantes=true</b> y luego podrás
+                cargar talles/stock desde variantes.
+              </span>
+            </span>
+          </label>
+        </div>
+      )}
 
       {/* Nombre */}
       <div>
@@ -704,7 +775,8 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
             <div>
               <div className="font-medium text-white/90">Modo legacy</div>
               <div className="text-xs text-white/60">
-                El stock simple aplica solo mientras <b>usa_variantes</b> sea false.
+                El stock simple aplica solo mientras <b>usa_variantes</b> sea
+                false.
               </div>
             </div>
 
@@ -730,7 +802,9 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
               required
               min={0}
             />
-            <div className="mt-1 text-xs text-white/60">Stock simple (legacy).</div>
+            <div className="mt-1 text-xs text-white/60">
+              Stock simple (legacy).
+            </div>
           </div>
         </div>
       )}
@@ -757,7 +831,9 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
           className="border rounded w-full px-3 py-2"
           disabled={loadingCategorias}
         >
-          <option value="">{loadingCategorias ? "Cargando..." : "Sin categoría"}</option>
+          <option value="">
+            {loadingCategorias ? "Cargando..." : "Sin categoría"}
+          </option>
 
           {categorias.map((cat) => (
             <option key={cat.id} value={cat.id}>
@@ -776,7 +852,8 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
             <div>
               <div className="font-medium text-white/90">Variantes</div>
               <div className="text-xs text-white/60">
-                Gestioná stock real por talle/variante. (Camino A: stock total ignora activo)
+                Gestioná stock real por talle/variante. (Camino A: stock total
+                ignora activo)
               </div>
             </div>
 
@@ -834,7 +911,9 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
                   variantes.map((v) => (
                     <tr key={v.id} className="rounded-lg bg-white/5">
                       <td className="px-2 py-2 text-white">{v.talle}</td>
-                      <td className="px-2 py-2 text-right text-white font-semibold">{v.stock}</td>
+                      <td className="px-2 py-2 text-right text-white font-semibold">
+                        {v.stock}
+                      </td>
                       <td className="px-2 py-2 text-center">
                         <input
                           type="checkbox"
@@ -894,7 +973,9 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
                 <div className="mt-4 grid gap-3">
                   <div>
-                    <label className="block text-sm font-medium text-white/90">Talle</label>
+                    <label className="block text-sm font-medium text-white/90">
+                      Talle
+                    </label>
                     <input
                       name="nombre"
                       value={varForm.nombre}
@@ -907,7 +988,9 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div>
-                      <label className="block text-sm font-medium text-white/90">Stock</label>
+                      <label className="block text-sm font-medium text-white/90">
+                        Stock
+                      </label>
                       <input
                         name="stock"
                         type="number"
