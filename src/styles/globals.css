@@ -1,3 +1,6 @@
+/* 1) Fuentes (import rápido desde Google Fonts) */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Raleway:wght@500;600;700;800;900&display=swap");
+
 /* === Tailwind === */
 @tailwind base;
 @tailwind components;
@@ -5,8 +8,7 @@
 
 /* === Design System Raeyz – Core Tokens === */
 
-/* 1) Fuentes (import rápido desde Google Fonts) */
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Raleway:wght@500;600;700;800;900&display=swap");
+
 
 /* 2) CSS Variables globales */
 :root {
