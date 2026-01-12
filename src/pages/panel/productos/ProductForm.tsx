@@ -40,6 +40,7 @@ type ProductoRow = {
   categoria_id: string | null;
   empresa_id: string;
   estado: string | null;
+  usa_variantes?: boolean | null;
   producto_categoria: ProductoCategoriaRow[] | null;
 };
 
@@ -226,7 +227,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
       const { data, error } = await supabase
         .from("producto")
         .select(
-          "id,nombre,descripcion,precio,stock,tipo,categoria_id,empresa_id,estado,producto_categoria(categoria(id,nombre,empresa_id))"
+          "id,nombre,descripcion,precio,stock,tipo,categoria_id,empresa_id,estado,usa_variantes,producto_categoria(categoria(id,nombre,empresa_id))"
         )
         .eq("id", productoId)
         .eq("empresa_id", empresaId)
@@ -423,7 +424,6 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
     }
 
     // Si es edición: nos quedamos en la pantalla.
-    // (Si querés sí o sí volver al listado, podés volver a poner router.push("/panel/productos") acá.)
   };
 
   // ============================
@@ -593,7 +593,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   };
 
   // ============================
-  // UX transición: Pasar a variantes
+  // UX transición: Pasar a variantes (B1.4 asistida)
   // ============================
   const handlePasarAVariantes = async () => {
     if (!productoId) {
@@ -602,31 +602,99 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
     }
     if (!empresaId) return;
 
-    const ok = confirm(
-      "¿Pasar a modo variantes? El stock simple quedará como fallback legacy y el stock real se gestionará en variantes."
-    );
-    if (!ok) return;
-
     setSwitchingToVariantes(true);
 
-    const { error } = await supabase
-      .from("producto")
-      .update({ usa_variantes: true })
-      .eq("id", productoId)
-      .eq("empresa_id", empresaId);
+    try {
+      // 1) Traer producto (fuente de verdad)
+      const { data: prod, error: prodErr } = await supabase
+        .from("producto")
+        .select("id, empresa_id, stock, usa_variantes")
+        .eq("id", productoId)
+        .eq("empresa_id", empresaId)
+        .single<{ id: string; empresa_id: string; stock: number; usa_variantes: boolean | null }>();
 
-    if (error) {
-      console.error("Error pasando a variantes:", error);
-      alert("No se pudo activar el modo variantes.");
+      if (prodErr) throw prodErr;
+      if (!prod) throw new Error("Producto no encontrado.");
+
+      if (prod.usa_variantes) {
+        // ya está, refrescamos y salimos
+        await fetchResumenStock();
+        await fetchVariantes();
+        setUsaVariantes(true);
+        return;
+      }
+
+      const stockDB = Number(prod.stock ?? 0);
+      const stockToMigrate = Number.isFinite(stockDB) ? stockDB : 0;
+
+      // 2) Confirm general de pasar a variantes
+      const ok = confirm(
+        "¿Pasar a modo variantes?\n\nEl stock real se gestionará en variantes. El stock simple quedará como fallback legacy."
+      );
+      if (!ok) return;
+
+      // 3) Si hay stock legacy, ofrecer migración a variante inicial
+      let shouldMigrate = false;
+      if (stockToMigrate > 0) {
+        shouldMigrate = confirm(
+          `Este producto tiene stock actual (${stockToMigrate}).\n\n¿Querés migrarlo a una variante inicial "Único"?`
+        );
+      }
+
+      if (shouldMigrate) {
+        // Evitar duplicar "Único" (chequeo simple)
+        const { data: existing, error: exErr } = await supabase
+          .from("producto_variante")
+          .select("id, talle")
+          .eq("empresa_id", empresaId)
+          .eq("producto_id", productoId)
+          .or("talle.eq.Único,talle.eq.Unico,talle.eq.General")
+          .limit(1);
+
+        if (exErr) throw exErr;
+
+        if (!existing || existing.length === 0) {
+          const { error: insErr } = await supabase.from("producto_variante").insert([
+            {
+              empresa_id: empresaId,
+              producto_id: productoId,
+              talle: "Único",
+              stock: stockToMigrate,
+              activo: true,
+            },
+          ]);
+          if (insErr) throw insErr;
+        }
+      }
+
+      // 4) Activar usa_variantes
+      const { error: updErr } = await supabase
+        .from("producto")
+        .update({ usa_variantes: true })
+        .eq("id", productoId)
+        .eq("empresa_id", empresaId);
+
+      if (updErr) throw updErr;
+
+      // 5) Refrescar UI
+      await fetchResumenStock();
+      setUsaVariantes(true);
+      await fetchVariantes();
+    } catch (err: unknown) {
+  console.error("Error pasando a variantes (B1.4):", err);
+
+  const message =
+    err instanceof Error
+      ? err.message
+      : typeof err === "string"
+        ? err
+        : "No se pudo activar el modo variantes.";
+
+  alert(message);
+} finally {
+
       setSwitchingToVariantes(false);
-      return;
     }
-
-    await fetchResumenStock();
-    setUsaVariantes(true);
-    await fetchVariantes();
-
-    setSwitchingToVariantes(false);
   };
 
   if (loadingProducto) {
@@ -802,9 +870,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
               required
               min={0}
             />
-            <div className="mt-1 text-xs text-white/60">
-              Stock simple (legacy).
-            </div>
+            <div className="mt-1 text-xs text-white/60">Stock simple (legacy).</div>
           </div>
         </div>
       )}
@@ -852,8 +918,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
             <div>
               <div className="font-medium text-white/90">Variantes</div>
               <div className="text-xs text-white/60">
-                Gestioná stock real por talle/variante. (Camino A: stock total
-                ignora activo)
+                Gestioná stock real por talle/variante. (Camino A: stock total ignora activo)
               </div>
             </div>
 

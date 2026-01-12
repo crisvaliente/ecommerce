@@ -5,7 +5,7 @@ BEGIN;
 
 -- 1) Tabla
 CREATE TABLE IF NOT EXISTS public.producto_variante (
-  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 
   empresa_id uuid NOT NULL,
   producto_id uuid NOT NULL,
