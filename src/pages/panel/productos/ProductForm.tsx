@@ -1,3 +1,4 @@
+// src/pages/panel/productos/ProductForm.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import { supabase } from "../../../lib/supabaseClient";
@@ -86,7 +87,7 @@ type ImagenProductoRow = {
   creado_en: string | null;
   orden: number;
   es_principal: boolean;
-  path: string | null; // opcional; por ahora no dependemos de esto
+  path: string | null; // canonical (recomendado)
 };
 
 type ImagenProductoUI = ImagenProductoRow & {
@@ -94,12 +95,6 @@ type ImagenProductoUI = ImagenProductoRow & {
 };
 
 const ProductForm: React.FC<Props> = ({ productoId }) => {
-
-  useEffect(() => {
-  (window as any).__supabase = supabase;
-}, []);
-
-
   const router = useRouter();
   const { dbUser } = useAuth();
   const empresaId = dbUser?.empresa_id as string | undefined;
@@ -232,7 +227,9 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
     const { data, error } = await supabase
       .from("imagen_producto")
-      .select("id,producto_id,url_imagen,descripcion,creado_en,orden,es_principal,path")
+      .select(
+        "id,producto_id,url_imagen,descripcion,creado_en,orden,es_principal,path"
+      )
       .eq("producto_id", productoId)
       .order("es_principal", { ascending: false })
       .order("orden", { ascending: true })
@@ -249,12 +246,12 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
     const enriched: ImagenProductoUI[] = [];
     for (const r of rows) {
-      const path = r.url_imagen; // contrato: url_imagen guarda el path
+      const rawPath = r.path ?? r.url_imagen; // ✅ preferimos canonical
       try {
-        const signedUrl = await createSignedUrl(path, 60 * 10);
+        const signedUrl = await createSignedUrl(rawPath, 60 * 10);
         enriched.push({ ...r, signedUrl });
       } catch (e) {
-        console.warn("No se pudo firmar url para", path, e);
+        console.warn("No se pudo firmar url para", rawPath, e);
         enriched.push({ ...r, signedUrl: undefined });
       }
     }
@@ -309,8 +306,9 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
     if (!ok) return;
 
     try {
-      // 1) storage (path vive en url_imagen)
-      await deleteProductoImagen(img.url_imagen);
+      // 1) storage (preferimos canonical, fallback legacy)
+      const rawPath = img.path ?? img.url_imagen;
+      await deleteProductoImagen(rawPath);
 
       // 2) DB
       const { error } = await supabase
@@ -352,7 +350,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
       const up = await uploadProductoImagen(productoId, file);
       const path = up.path;
 
-      // 2) next orden (consulta simple)
+      // 2) next orden
       const { data: lastRow, error: lastErr } = await supabase
         .from("imagen_producto")
         .select("orden")
@@ -374,17 +372,19 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
       if (anyErr) throw new Error(anyErr.message);
       const shouldBePrincipal = !anyRow || anyRow.length === 0;
 
-      // 4) insert DB (url_imagen legacy = path)
+      // 4) insert DB
       const { data: inserted, error: insErr } = await supabase
         .from("imagen_producto")
         .insert({
           producto_id: productoId,
-          url_imagen: path,
+          url_imagen: path, // legacy
+          path: path, // ✅ canonical alineado a policies
           orden: nextOrden,
           es_principal: shouldBePrincipal,
-          // path: path, // si querés duplicar también
         })
-        .select("id,producto_id,url_imagen,descripcion,creado_en,orden,es_principal,path")
+        .select(
+          "id,producto_id,url_imagen,descripcion,creado_en,orden,es_principal,path"
+        )
         .single<ImagenProductoRow>();
 
       if (insErr || !inserted) {
@@ -395,12 +395,12 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
         throw new Error(insErr?.message || "No se pudo insertar imagen en DB.");
       }
 
-      // 5) signed url preview
-      const signedUrl = await createSignedUrl(inserted.url_imagen, 60 * 10);
+      // 5) signed url preview (usar path canonical si existe)
+      const signedUrl = await createSignedUrl(inserted.path ?? inserted.url_imagen, 60 * 10);
 
       setImagenes((prev) => [{ ...inserted, signedUrl }, ...prev]);
 
-      // si fue principal, forzamos consistencia (por si existían)
+      // si fue principal, forzamos consistencia
       if (shouldBePrincipal) {
         await setPrincipalImagen(inserted.id);
       }
@@ -1125,7 +1125,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
           <div>
             <div className="font-medium text-white/90">Imágenes</div>
             <div className="text-xs text-white/60">
-              Bucket privado. Guardamos el <b>path</b> en <b>url_imagen</b> (legacy).
+              Bucket privado. Guardamos el <b>path</b> en <b>url_imagen</b> (legacy) y en <b>path</b> (canonical).
             </div>
           </div>
 
@@ -1213,7 +1213,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
                 </div>
 
                 <div className="mt-1 text-[11px] text-white/50 break-all">
-                  {img.url_imagen}
+                  {img.path ?? img.url_imagen}
                 </div>
               </div>
             ))
