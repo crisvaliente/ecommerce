@@ -2,6 +2,11 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import { supabase } from "../../../lib/supabaseClient";
 import { useAuth } from "../../../context/AuthContext";
+import {
+  uploadProductoImagen,
+  createSignedUrl,
+  deleteProductoImagen,
+} from "../../../utils/storageProductoImagen";
 
 type Categoria = {
   id: string;
@@ -72,7 +77,29 @@ type VarianteFormState = {
   activo: boolean;
 };
 
+// ===== Imágenes =====
+type ImagenProductoRow = {
+  id: string;
+  producto_id: string;
+  url_imagen: string; // legacy = path
+  descripcion: string | null;
+  creado_en: string | null;
+  orden: number;
+  es_principal: boolean;
+  path: string | null; // opcional; por ahora no dependemos de esto
+};
+
+type ImagenProductoUI = ImagenProductoRow & {
+  signedUrl?: string;
+};
+
 const ProductForm: React.FC<Props> = ({ productoId }) => {
+
+  useEffect(() => {
+  (window as any).__supabase = supabase;
+}, []);
+
+
   const router = useRouter();
   const { dbUser } = useAuth();
   const empresaId = dbUser?.empresa_id as string | undefined;
@@ -134,6 +161,13 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   const [switchingToVariantes, setSwitchingToVariantes] = useState(false);
 
   // ============================
+  // Imágenes state
+  // ============================
+  const [imagenes, setImagenes] = useState<ImagenProductoUI[]>([]);
+  const [loadingImagenes, setLoadingImagenes] = useState(false);
+  const [uploadingImagen, setUploadingImagen] = useState(false);
+
+  // ============================
   // Helpers stock resumen
   // ============================
   const fetchResumenStock = async () => {
@@ -189,6 +223,196 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   };
 
   // ============================
+  // Imágenes: fetch list + signed urls
+  // ============================
+  const fetchImagenes = async () => {
+    if (!productoId) return;
+
+    setLoadingImagenes(true);
+
+    const { data, error } = await supabase
+      .from("imagen_producto")
+      .select("id,producto_id,url_imagen,descripcion,creado_en,orden,es_principal,path")
+      .eq("producto_id", productoId)
+      .order("es_principal", { ascending: false })
+      .order("orden", { ascending: true })
+      .order("creado_en", { ascending: true });
+
+    if (error) {
+      console.error("Error cargando imagenes:", error);
+      setImagenes([]);
+      setLoadingImagenes(false);
+      return;
+    }
+
+    const rows = (data ?? []) as ImagenProductoRow[];
+
+    const enriched: ImagenProductoUI[] = [];
+    for (const r of rows) {
+      const path = r.url_imagen; // contrato: url_imagen guarda el path
+      try {
+        const signedUrl = await createSignedUrl(path, 60 * 10);
+        enriched.push({ ...r, signedUrl });
+      } catch (e) {
+        console.warn("No se pudo firmar url para", path, e);
+        enriched.push({ ...r, signedUrl: undefined });
+      }
+    }
+
+    setImagenes(enriched);
+    setLoadingImagenes(false);
+  };
+
+  // ============================
+  // Imágenes: set principal
+  // ============================
+  const setPrincipalImagen = async (imagenId: string) => {
+    if (!productoId) return;
+
+    // 1) todas false
+    const { error: e1 } = await supabase
+      .from("imagen_producto")
+      .update({ es_principal: false })
+      .eq("producto_id", productoId);
+
+    if (e1) {
+      console.error("Error limpiando principal:", e1);
+      alert("No se pudo actualizar principal.");
+      return;
+    }
+
+    // 2) elegida true
+    const { error: e2 } = await supabase
+      .from("imagen_producto")
+      .update({ es_principal: true })
+      .eq("id", imagenId)
+      .eq("producto_id", productoId);
+
+    if (e2) {
+      console.error("Error seteando principal:", e2);
+      alert("No se pudo actualizar principal.");
+      return;
+    }
+
+    setImagenes((prev) =>
+      prev.map((img) => ({ ...img, es_principal: img.id === imagenId }))
+    );
+  };
+
+  // ============================
+  // Imágenes: delete (storage + DB)
+  // ============================
+  const handleDeleteImagen = async (img: ImagenProductoUI) => {
+    if (!productoId) return;
+
+    const ok = confirm("¿Eliminar esta imagen?");
+    if (!ok) return;
+
+    try {
+      // 1) storage (path vive en url_imagen)
+      await deleteProductoImagen(img.url_imagen);
+
+      // 2) DB
+      const { error } = await supabase
+        .from("imagen_producto")
+        .delete()
+        .eq("id", img.id)
+        .eq("producto_id", productoId);
+
+      if (error) throw new Error(error.message);
+
+      // 3) UI
+      setImagenes((prev) => prev.filter((x) => x.id !== img.id));
+
+      // 4) si era principal, promover otra
+      if (img.es_principal) {
+        const remaining = imagenes.filter((x) => x.id !== img.id);
+        const next = remaining[0];
+        if (next) await setPrincipalImagen(next.id);
+      }
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message ?? "No se pudo eliminar la imagen.");
+    }
+  };
+
+  // ============================
+  // Imágenes: upload + insert DB
+  // ============================
+  const handleUploadImagen = async (file: File) => {
+    if (!productoId) {
+      alert("Primero creá el producto.");
+      return;
+    }
+
+    setUploadingImagen(true);
+
+    try {
+      // 1) subir a storage
+      const up = await uploadProductoImagen(productoId, file);
+      const path = up.path;
+
+      // 2) next orden (consulta simple)
+      const { data: lastRow, error: lastErr } = await supabase
+        .from("imagen_producto")
+        .select("orden")
+        .eq("producto_id", productoId)
+        .order("orden", { ascending: false })
+        .limit(1)
+        .maybeSingle<{ orden: number }>();
+
+      if (lastErr) throw new Error(lastErr.message);
+      const nextOrden = (lastRow?.orden ?? 0) + 1;
+
+      // 3) si es primera imagen => principal
+      const { data: anyRow, error: anyErr } = await supabase
+        .from("imagen_producto")
+        .select("id")
+        .eq("producto_id", productoId)
+        .limit(1);
+
+      if (anyErr) throw new Error(anyErr.message);
+      const shouldBePrincipal = !anyRow || anyRow.length === 0;
+
+      // 4) insert DB (url_imagen legacy = path)
+      const { data: inserted, error: insErr } = await supabase
+        .from("imagen_producto")
+        .insert({
+          producto_id: productoId,
+          url_imagen: path,
+          orden: nextOrden,
+          es_principal: shouldBePrincipal,
+          // path: path, // si querés duplicar también
+        })
+        .select("id,producto_id,url_imagen,descripcion,creado_en,orden,es_principal,path")
+        .single<ImagenProductoRow>();
+
+      if (insErr || !inserted) {
+        // si falla DB, limpiamos storage para no dejar basura
+        try {
+          await deleteProductoImagen(path);
+        } catch {}
+        throw new Error(insErr?.message || "No se pudo insertar imagen en DB.");
+      }
+
+      // 5) signed url preview
+      const signedUrl = await createSignedUrl(inserted.url_imagen, 60 * 10);
+
+      setImagenes((prev) => [{ ...inserted, signedUrl }, ...prev]);
+
+      // si fue principal, forzamos consistencia (por si existían)
+      if (shouldBePrincipal) {
+        await setPrincipalImagen(inserted.id);
+      }
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message ?? "Error subiendo imagen.");
+    } finally {
+      setUploadingImagen(false);
+    }
+  };
+
+  // ============================
   // 1) Traer categorías
   // ============================
   useEffect(() => {
@@ -223,7 +447,6 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
     const fetchProducto = async () => {
       setLoadingProducto(true);
 
-      // A) producto (sin view)
       const { data, error } = await supabase
         .from("producto")
         .select(
@@ -239,7 +462,6 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
         return;
       }
 
-      // B) resumen stock (view) por separado
       const { data: resumen, error: resumenError } = await supabase
         .from("producto_stock_resumen")
         .select("stock_total, usa_variantes")
@@ -258,7 +480,6 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
       setUsaVariantes(_usaVariantes);
       setStockTotal(_stockTotal);
 
-      // bridge-first: si no hay rows en puente, cae a legacy categoria_id
       const pc0 = data.producto_categoria?.[0] ?? null;
       const cat = pc0 ? pickCategoria(pc0.categoria) : null;
 
@@ -294,6 +515,15 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   }, [productoId, empresaId, usaVariantes]);
 
   // ============================
+  // 2.2) Si edición → traer imágenes
+  // ============================
+  useEffect(() => {
+    if (!productoId) return;
+    fetchImagenes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productoId]);
+
+  // ============================
   // 3) Handler inputs producto
   // ============================
   const handleChange = (
@@ -310,7 +540,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   };
 
   // ============================
-  // Helpers: guardar producto (sin cambiar estado)
+  // Helpers: guardar producto
   // ============================
   const saveProducto = async (overrideEstado?: ProductoEstado) => {
     if (!empresaId) {
@@ -325,7 +555,6 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
     const estadoToSave = overrideEstado ?? form.estado;
 
-    // ✅ Regla: si usa variantes, NO tocamos producto.stock (legacy fallback)
     const shouldWriteLegacyStock = !usaVariantes;
 
     const basePayload = {
@@ -334,7 +563,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
       descripcion: form.descripcion || null,
       precio: Number(form.precio),
       tipo: form.tipo || null,
-      categoria_id: form.categoria_id, // legacy write
+      categoria_id: form.categoria_id,
       empresa_id: empresaId,
       estado: estadoToSave,
     };
@@ -376,16 +605,9 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
     return { ok: true as const, id: data.id };
   };
 
-  // ============================
-  // Capa 2 helper: si se eligió "crear en modo variantes"
-  // ============================
   const maybeSetUsaVariantesAfterCreate = async (newId: string) => {
-    // Solo aplica en /nuevo
     if (productoId) return;
-
-    // Solo si el usuario lo marcó
     if (!crearEnModoVariantes) return;
-
     if (!empresaId) return;
 
     const { error } = await supabase
@@ -414,16 +636,11 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
     if (!res.ok) return;
 
-    // ✅ Capa 1: si es create → ir a /panel/productos/<id>
     if (!productoId && res.id) {
-      // ✅ Capa 2: si marcó "Crear en modo variantes" → update usa_variantes=true
       await maybeSetUsaVariantesAfterCreate(res.id);
-
       router.replace(`/panel/productos/${res.id}`);
       return;
     }
-
-    // Si es edición: nos quedamos en la pantalla.
   };
 
   // ============================
@@ -438,7 +655,6 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
     if (!res.ok) return;
 
-    // Si estamos en /nuevo y se publica al crear:
     if (!productoId && res.id) {
       await maybeSetUsaVariantesAfterCreate(res.id);
       router.replace(`/panel/productos/${res.id}`);
@@ -605,19 +821,22 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
     setSwitchingToVariantes(true);
 
     try {
-      // 1) Traer producto (fuente de verdad)
       const { data: prod, error: prodErr } = await supabase
         .from("producto")
         .select("id, empresa_id, stock, usa_variantes")
         .eq("id", productoId)
         .eq("empresa_id", empresaId)
-        .single<{ id: string; empresa_id: string; stock: number; usa_variantes: boolean | null }>();
+        .single<{
+          id: string;
+          empresa_id: string;
+          stock: number;
+          usa_variantes: boolean | null;
+        }>();
 
       if (prodErr) throw prodErr;
       if (!prod) throw new Error("Producto no encontrado.");
 
       if (prod.usa_variantes) {
-        // ya está, refrescamos y salimos
         await fetchResumenStock();
         await fetchVariantes();
         setUsaVariantes(true);
@@ -627,13 +846,11 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
       const stockDB = Number(prod.stock ?? 0);
       const stockToMigrate = Number.isFinite(stockDB) ? stockDB : 0;
 
-      // 2) Confirm general de pasar a variantes
       const ok = confirm(
         "¿Pasar a modo variantes?\n\nEl stock real se gestionará en variantes. El stock simple quedará como fallback legacy."
       );
       if (!ok) return;
 
-      // 3) Si hay stock legacy, ofrecer migración a variante inicial
       let shouldMigrate = false;
       if (stockToMigrate > 0) {
         shouldMigrate = confirm(
@@ -642,7 +859,6 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
       }
 
       if (shouldMigrate) {
-        // Evitar duplicar "Único" (chequeo simple)
         const { data: existing, error: exErr } = await supabase
           .from("producto_variante")
           .select("id, talle")
@@ -667,7 +883,6 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
         }
       }
 
-      // 4) Activar usa_variantes
       const { error: updErr } = await supabase
         .from("producto")
         .update({ usa_variantes: true })
@@ -676,23 +891,21 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
       if (updErr) throw updErr;
 
-      // 5) Refrescar UI
       await fetchResumenStock();
       setUsaVariantes(true);
       await fetchVariantes();
     } catch (err: unknown) {
-  console.error("Error pasando a variantes (B1.4):", err);
+      console.error("Error pasando a variantes (B1.4):", err);
 
-  const message =
-    err instanceof Error
-      ? err.message
-      : typeof err === "string"
-        ? err
-        : "No se pudo activar el modo variantes.";
+      const message =
+        err instanceof Error
+          ? err.message
+          : typeof err === "string"
+          ? err
+          : "No se pudo activar el modo variantes.";
 
-  alert(message);
-} finally {
-
+      alert(message);
+    } finally {
       setSwitchingToVariantes(false);
     }
   };
@@ -717,13 +930,11 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
           {form.estado === "draft" ? (
             <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
-              Este producto está en <b>borrador</b>. No debería mostrarse en la
-              tienda hasta publicarlo.
+              Este producto está en <b>borrador</b>. No debería mostrarse en la tienda hasta publicarlo.
             </div>
           ) : (
             <div className="mt-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
-              Este producto está <b>publicado</b>. Se considera visible en la
-              tienda.
+              Este producto está <b>publicado</b>. Se considera visible en la tienda.
             </div>
           )}
 
@@ -747,8 +958,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 
             {usaVariantes && (
               <div className="mt-1 text-xs text-white/60">
-                Nota: en Camino A el stock total suma existencias aunque la
-                variante esté inactiva.
+                Nota: en Camino A el stock total suma existencias aunque la variante esté inactiva.
               </div>
             )}
           </div>
@@ -791,8 +1001,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
             <span>
               <span className="font-medium">Crear en modo variantes</span>
               <span className="block text-xs text-white/60">
-                Al crear, se activará <b>usa_variantes=true</b> y luego podrás
-                cargar talles/stock desde variantes.
+                Al crear, se activará <b>usa_variantes=true</b> y luego podrás cargar talles/stock desde variantes.
               </span>
             </span>
           </label>
@@ -843,8 +1052,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
             <div>
               <div className="font-medium text-white/90">Modo legacy</div>
               <div className="text-xs text-white/60">
-                El stock simple aplica solo mientras <b>usa_variantes</b> sea
-                false.
+                El stock simple aplica solo mientras <b>usa_variantes</b> sea false.
               </div>
             </div>
 
@@ -907,6 +1115,110 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
             </option>
           ))}
         </select>
+      </div>
+
+      {/* ============================
+          Imágenes (B1.5)
+         ============================ */}
+      <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="font-medium text-white/90">Imágenes</div>
+            <div className="text-xs text-white/60">
+              Bucket privado. Guardamos el <b>path</b> en <b>url_imagen</b> (legacy).
+            </div>
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={fetchImagenes}
+              disabled={loadingImagenes || !productoId}
+              className="rounded-lg bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/15 disabled:opacity-60"
+            >
+              {loadingImagenes ? "Cargando..." : "Refrescar"}
+            </button>
+
+            <label className="cursor-pointer rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-60">
+              {uploadingImagen ? "Subiendo..." : "Subir imagen"}
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                disabled={!productoId || uploadingImagen}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleUploadImagen(f);
+                  e.currentTarget.value = "";
+                }}
+              />
+            </label>
+          </div>
+        </div>
+
+        {!productoId && (
+          <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+            Guardá/creá el producto primero para poder subir imágenes.
+          </div>
+        )}
+
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {loadingImagenes ? (
+            <div className="text-white/70">Cargando imágenes...</div>
+          ) : imagenes.length === 0 ? (
+            <div className="text-white/70">No hay imágenes todavía.</div>
+          ) : (
+            imagenes.map((img) => (
+              <div
+                key={img.id}
+                className="rounded-xl border border-white/10 bg-black/20 p-2"
+              >
+                <div className="aspect-square w-full overflow-hidden rounded-lg bg-white/5">
+                  {img.signedUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={img.signedUrl}
+                      alt={img.descripcion ?? "Imagen producto"}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-xs text-white/60">
+                      (sin preview)
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  {img.es_principal ? (
+                    <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-100">
+                      Principal
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setPrincipalImagen(img.id)}
+                      className="rounded-lg bg-white/10 px-2 py-1 text-xs text-white hover:bg-white/15"
+                    >
+                      Hacer principal
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteImagen(img)}
+                    className="rounded-lg bg-red-500/15 px-2 py-1 text-xs text-red-100 hover:bg-red-500/25"
+                  >
+                    Eliminar
+                  </button>
+                </div>
+
+                <div className="mt-1 text-[11px] text-white/50 break-all">
+                  {img.url_imagen}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
 
       {/* ============================
