@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
+// src/pages/panel/productos/index.tsx
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import AdminLayout from "../../../components/layout/AdminLayout";
 import { useAuth } from "../../../context/AuthContext";
 import { supabase } from "../../../lib/supabaseClient";
@@ -17,20 +18,33 @@ type ProductoUI = {
   usaVariantes: boolean;
 };
 
-type ProductoRow = {
-  id: string;
+// DTO esperado desde /api/panel/productos
+type ProductoPanelDTO = {
+  producto_id: string;
   nombre: string;
   descripcion: string | null;
   precio: number;
   estado: ProductoEstado;
-  stock: number | null; // legacy fallback
+  usa_variantes: boolean;
+  stock_base: number;
+  stock_efectivo: number;
+  stock_source: "view" | "legacy";
 };
 
-type StockResumenRow = {
-  producto_id: string;
-  stock_total: number;
-  usa_variantes: boolean;
+type ApiOk = {
+  items: ProductoPanelDTO[];
+  meta: {
+    empresa_id: string;
+    source_mode: "tolerante";
+    resumen_ok: boolean;
+    resumen_count: number;
+    auth_mode: "bearer_or_cookie";
+  };
 };
+
+
+
+
 
 const ProductosPage: React.FC = () => {
   const { dbUser } = useAuth();
@@ -41,86 +55,91 @@ const ProductosPage: React.FC = () => {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [filtro, setFiltro] = useState<FiltroEstado>("all");
 
-  useEffect(() => {
-    const fetchProductos = async () => {
-      try {
-        if (!dbUser?.empresa_id) {
-          setProductos([]);
-          setLoading(false);
-          return;
-        }
+  const fetchProductos = useCallback(async () => {
+    try {
+      setLoading(true);
+      setErrorMsg(null);
 
-        // 1) Productos (tabla base)
-        const { data: productosData, error: productosError } = await supabase
-          .from("producto")
-          .select("id, nombre, descripcion, precio, estado, stock")
-          .eq("empresa_id", dbUser.empresa_id)
-          .order("nombre", { ascending: true })
-          .returns<ProductoRow[]>();
-
-        if (productosError) {
-          console.error("[productos] error:", productosError);
-          setErrorMsg("No se pudieron cargar los productos.");
-          setProductos([]);
-          return;
-        }
-
-        // 2) Resumen de stock (view). Si falla, seguimos con fallback a producto.stock.
-        const { data: resumenData, error: resumenError } = await supabase
-          .from("producto_stock_resumen")
-          .select("producto_id, stock_total, usa_variantes")
-          .eq("empresa_id", dbUser.empresa_id)
-          .returns<StockResumenRow[]>();
-
-        if (resumenError) {
-          console.warn("[productos] resumen warning:", resumenError);
-        }
-
-        const resumenMap = new Map<string, StockResumenRow>(
-          (resumenData ?? []).map((r) => [r.producto_id, r])
-        );
-
-        const ui: ProductoUI[] = (productosData ?? []).map((p) => {
-          const r = resumenMap.get(p.id);
-
-          const stockTotal =
-            typeof r?.stock_total === "number"
-              ? r.stock_total
-              : typeof p.stock === "number"
-              ? p.stock
-              : 0;
-
-          return {
-            id: p.id,
-            nombre: p.nombre,
-            descripcion: p.descripcion,
-            precio: Number(p.precio),
-            estado: p.estado,
-            stockTotal,
-            usaVariantes: Boolean(r?.usa_variantes),
-          };
-        });
-
-        setProductos(ui);
-      } catch (err) {
-        console.error(err);
-        setErrorMsg("Ocurrió un error al cargar los productos.");
-      } finally {
-        setLoading(false);
+      if (!dbUser?.empresa_id) {
+        setProductos([]);
+        return;
       }
-    };
 
-    fetchProductos();
+      // Fuente de verdad para token (según tu AuthContext): supabase.auth.getSession()
+      const {
+        data: { session },
+        error: sessErr,
+      } = await supabase.auth.getSession();
+
+      if (sessErr) console.error("[productos] getSession error:", sessErr);
+
+      const accessToken = session?.access_token;
+      if (!accessToken) {
+        setProductos([]);
+        setErrorMsg("Sesión no válida. Volvé a iniciar sesión.");
+        return;
+      }
+
+      const url = `/api/panel/productos?empresa_id=${encodeURIComponent(
+        dbUser.empresa_id
+      )}`;
+
+      const r = await fetch(url, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (!r.ok) {
+        const txt = await r.text().catch(() => "");
+        console.error("[productos] endpoint error:", r.status, txt);
+        setProductos([]);
+        setErrorMsg("No se pudieron cargar los productos.");
+        return;
+      }
+
+      const data = (await r.json()) as ApiOk;
+
+      // UI: sin lógica de stock/pertenencia. Renderiza lo que viene del endpoint.
+      const ui: ProductoUI[] = (data.items ?? []).map((p) => ({
+        id: p.producto_id,
+        nombre: p.nombre,
+        descripcion: p.descripcion,
+        precio: Number(p.precio),
+        estado: p.estado,
+        stockTotal: Number(p.stock_efectivo ?? 0),
+        usaVariantes: Boolean(p.usa_variantes),
+      }));
+
+      setProductos(ui);
+    } catch (err) {
+      console.error(err);
+      setProductos([]);
+      setErrorMsg("Ocurrió un error al cargar los productos.");
+    } finally {
+      setLoading(false);
+    }
   }, [dbUser?.empresa_id]);
+
+  useEffect(() => {
+    fetchProductos();
+  }, [fetchProductos]);
 
   const productosFiltrados = useMemo(() => {
     if (filtro === "all") return productos;
     return productos.filter((p) => p.estado === filtro);
   }, [productos, filtro]);
 
+  // Mutación permitida por ancla (deuda consciente TD-001)
   const handleDelete = async (id: string) => {
     const ok = window.confirm("¿Seguro que querés eliminar este producto?");
     if (!ok) return;
+
+    if (!dbUser?.empresa_id) {
+      setErrorMsg("No se encontró empresa asociada al usuario.");
+      return;
+    }
 
     setDeletingId(id);
     setErrorMsg(null);
@@ -129,7 +148,7 @@ const ProductosPage: React.FC = () => {
       .from("producto")
       .delete()
       .eq("id", id)
-      .eq("empresa_id", dbUser?.empresa_id);
+      .eq("empresa_id", dbUser.empresa_id);
 
     if (error) {
       console.error("[productos] delete error:", error);
@@ -172,7 +191,9 @@ const ProductosPage: React.FC = () => {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Productos</h1>
-          <p className="text-sm text-slate-300">Gestioná los productos de tu tienda.</p>
+          <p className="text-sm text-slate-300">
+            Gestioná los productos de tu tienda.
+          </p>
         </div>
 
         <div className="flex items-center gap-3">
@@ -187,6 +208,16 @@ const ProductosPage: React.FC = () => {
             <option value="draft">Borradores</option>
           </select>
 
+          {/* Refresh (camino de lectura => endpoint) */}
+          <button
+            type="button"
+            onClick={fetchProductos}
+            disabled={loading}
+            className="rounded-lg bg-white/10 px-4 py-2 text-sm font-medium text-white hover:bg-white/15 disabled:opacity-60"
+          >
+            {loading ? "Cargando…" : "Refrescar"}
+          </button>
+
           <Link
             href="/panel/productos/nuevo"
             className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
@@ -198,10 +229,14 @@ const ProductosPage: React.FC = () => {
 
       {loading && <p className="text-sm text-slate-300">Cargando productos…</p>}
 
-      {errorMsg && !loading && <p className="mb-3 text-sm text-rose-400">{errorMsg}</p>}
+      {errorMsg && !loading && (
+        <p className="mb-3 text-sm text-rose-400">{errorMsg}</p>
+      )}
 
       {!loading && !errorMsg && productosFiltrados.length === 0 && (
-        <p className="text-sm text-slate-400">No hay productos para el filtro seleccionado.</p>
+        <p className="text-sm text-slate-400">
+          No hay productos para el filtro seleccionado.
+        </p>
       )}
 
       {!loading && productosFiltrados.length > 0 && (
@@ -209,11 +244,21 @@ const ProductosPage: React.FC = () => {
           <table className="min-w-full text-sm">
             <thead className="bg-slate-900/60">
               <tr>
-                <th className="px-4 py-2 text-left font-medium text-slate-300">Nombre</th>
-                <th className="px-4 py-2 text-left font-medium text-slate-300">Precio</th>
-                <th className="px-4 py-2 text-left font-medium text-slate-300">Stock</th>
-                <th className="px-4 py-2 text-left font-medium text-slate-300">Estado</th>
-                <th className="px-4 py-2 text-right font-medium text-slate-300">Acciones</th>
+                <th className="px-4 py-2 text-left font-medium text-slate-300">
+                  Nombre
+                </th>
+                <th className="px-4 py-2 text-left font-medium text-slate-300">
+                  Precio
+                </th>
+                <th className="px-4 py-2 text-left font-medium text-slate-300">
+                  Stock
+                </th>
+                <th className="px-4 py-2 text-left font-medium text-slate-300">
+                  Estado
+                </th>
+                <th className="px-4 py-2 text-right font-medium text-slate-300">
+                  Acciones
+                </th>
               </tr>
             </thead>
 
@@ -233,7 +278,11 @@ const ProductosPage: React.FC = () => {
                   </td>
 
                   <td className="px-4 py-2">
-                    <span className={p.stockTotal <= 0 ? "text-rose-300" : "text-slate-200"}>
+                    <span
+                      className={
+                        p.stockTotal <= 0 ? "text-rose-300" : "text-slate-200"
+                      }
+                    >
                       {p.stockTotal}
                     </span>
                   </td>
@@ -255,7 +304,7 @@ const ProductosPage: React.FC = () => {
                         onClick={() => handleDelete(p.id)}
                         className={`text-xs font-medium ${
                           deletingId === p.id
-                            ? "text-slate-500 cursor-not-allowed"
+                            ? "cursor-not-allowed text-slate-500"
                             : "text-rose-400 hover:underline"
                         }`}
                       >
