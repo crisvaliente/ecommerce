@@ -88,6 +88,8 @@ type ImagenProductoRow = {
   orden: number;
   es_principal: boolean;
   path: string | null; // canonical (recomendado)
+  deleted_at: string | null;
+
 };
 
 type ImagenProductoUI = ImagenProductoRow & {
@@ -220,197 +222,312 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   // ============================
   // Imágenes: fetch list + signed urls
   // ============================
-  const fetchImagenes = async () => {
-    if (!productoId) return;
+const fetchImagenes = async () => {
+  if (!productoId) return;
 
-    setLoadingImagenes(true);
+  setLoadingImagenes(true);
 
-    const { data, error } = await supabase
-      .from("imagen_producto")
-      .select(
-        "id,producto_id,url_imagen,descripcion,creado_en,orden,es_principal,path"
-      )
-      .eq("producto_id", productoId)
-      .order("es_principal", { ascending: false })
-      .order("orden", { ascending: true })
-      .order("creado_en", { ascending: true });
+  // ===== DEBUG RLS (temporal) =====
+  try {
+    const { data: jwt, error: jwtErr } = await supabase.rpc("debug_jwt", {});
+    console.log("[debug_jwt]", jwt, jwtErr);
 
-    if (error) {
-      console.error("Error cargando imagenes:", error);
-      setImagenes([]);
-      setLoadingImagenes(false);
-      return;
-    }
+    const { data: can, error: canErr } = await supabase.rpc(
+      "can_manage_producto_member",
+      { p_producto: productoId }
+    );
+    console.log("[can_manage_producto_member]", { productoId, can, canErr });
+  } catch (e) {
+    console.log("[DEBUG RPC EXCEPTION]", e);
+  }
+  // ===============================
 
-    const rows = (data ?? []) as ImagenProductoRow[];
+  const { data, error } = await supabase
+    .from("imagen_producto")
+    .select(
+      "id,producto_id,url_imagen,descripcion,creado_en,orden,es_principal,path,deleted_at"
+    )
+    .eq("producto_id", productoId)
+    .is("deleted_at", null) // ✅ SOLO activas
+    .order("es_principal", { ascending: false })
+    .order("orden", { ascending: true })
+    .order("creado_en", { ascending: true });
 
-    const enriched: ImagenProductoUI[] = [];
-    for (const r of rows) {
-      const rawPath = r.path ?? r.url_imagen; // ✅ preferimos canonical
-      try {
-        const signedUrl = await createSignedUrl(rawPath, 60 * 10);
-        enriched.push({ ...r, signedUrl });
-      } catch (e) {
-        console.warn("No se pudo firmar url para", rawPath, e);
-        enriched.push({ ...r, signedUrl: undefined });
-      }
-    }
-
-    setImagenes(enriched);
+  if (error) {
+    console.error("Error cargando imagenes:", error);
+    setImagenes([]);
     setLoadingImagenes(false);
-  };
+    return;
+  }
+
+  const rows = (data ?? []) as ImagenProductoRow[];
+
+  const enriched: ImagenProductoUI[] = [];
+  for (const r of rows) {
+    const rawPath = r.path ?? r.url_imagen;
+    try {
+      const signedUrl = await createSignedUrl(rawPath, 60 * 10);
+      enriched.push({ ...r, signedUrl });
+    } catch (e) {
+      console.warn("No se pudo firmar url para", rawPath, e);
+      enriched.push({ ...r, signedUrl: undefined });
+    }
+  }
+
+  setImagenes(enriched);
+  setLoadingImagenes(false);
+};
+
 
   // ============================
   // Imágenes: set principal
   // ============================
-  const setPrincipalImagen = async (imagenId: string) => {
-    if (!productoId) return;
+// ============================
 
-    // 1) todas false
-    const { error: e1 } = await supabase
-      .from("imagen_producto")
-      .update({ es_principal: false })
-      .eq("producto_id", productoId);
+// ============================
+// Imágenes: set principal
+// ============================
+const setPrincipalImagen = async (imagenId: string) => {
+  if (!productoId) return;
 
-    if (e1) {
-      console.error("Error limpiando principal:", e1);
-      alert("No se pudo actualizar principal.");
+  // 1) desmarcar principal SOLO en activas
+  const { error: e1 } = await supabase
+    .from("imagen_producto")
+    .update({ es_principal: false })
+    .eq("producto_id", productoId)
+    .is("deleted_at", null);
+
+  if (e1) {
+    console.error("Error limpiando principal:", e1);
+    alert("No se pudo actualizar principal.");
+    return;
+  }
+
+  // 2) marcar elegida como principal SOLO si está activa
+  const { error: e2 } = await supabase
+    .from("imagen_producto")
+    .update({ es_principal: true })
+    .eq("id", imagenId)
+    .eq("producto_id", productoId)
+    .is("deleted_at", null);
+
+  if (e2) {
+    console.error("Error seteando principal:", e2);
+    alert("No se pudo actualizar principal.");
+    return;
+  }
+
+  setImagenes((prev) =>
+    prev.map((img) => ({ ...img, es_principal: img.id === imagenId }))
+  );
+};
+
+// ============================
+// Imágenes: delete (DB first + storage best-effort)
+// ============================
+const handleDeleteImagen = async (img: ImagenProductoUI) => {
+  if (!productoId) return;
+
+  const ok = confirm("¿Eliminar esta imagen?");
+  if (!ok) return;
+
+  try {
+    // 0) Guardas rápidas de coherencia
+    if (img.producto_id !== productoId) {
+      alert("Esta imagen no pertenece al producto actual (guard).");
       return;
     }
 
-    // 2) elegida true
-    const { error: e2 } = await supabase
-      .from("imagen_producto")
-      .update({ es_principal: true })
-      .eq("id", imagenId)
-      .eq("producto_id", productoId);
+    const rawPath = img.path ?? img.url_imagen;
 
-    if (e2) {
-      console.error("Error seteando principal:", e2);
-      alert("No se pudo actualizar principal.");
+    // 1) Soft delete en DB vía RPC (evita RLS UPDATE fantasma)
+    const { error: rpcErr } = await supabase.rpc("soft_delete_imagen_producto", {
+      p_imagen_id: img.id,
+    });
+
+    if (rpcErr) {
+      console.error("[delete-image] RPC error:", rpcErr);
+      alert(JSON.stringify(rpcErr, null, 2));
       return;
     }
 
-    setImagenes((prev) =>
-      prev.map((img) => ({ ...img, es_principal: img.id === imagenId }))
-    );
-  };
+    // 2) UI optimista
+    setImagenes((prev) => prev.filter((x) => x.id !== img.id));
 
-  // ============================
-  // Imágenes: delete (storage + DB)
-  // ============================
-  const handleDeleteImagen = async (img: ImagenProductoUI) => {
-    if (!productoId) return;
-
-    const ok = confirm("¿Eliminar esta imagen?");
-    if (!ok) return;
-
-    try {
-      // 1) storage (preferimos canonical, fallback legacy)
-      const rawPath = img.path ?? img.url_imagen;
-      await deleteProductoImagen(rawPath);
-
-      // 2) DB
-      const { error } = await supabase
-        .from("imagen_producto")
-        .delete()
-        .eq("id", img.id)
-        .eq("producto_id", productoId);
-
-      if (error) throw new Error(error.message);
-
-      // 3) UI
-      setImagenes((prev) => prev.filter((x) => x.id !== img.id));
-
-      // 4) si era principal, promover otra
-      if (img.es_principal) {
-        const remaining = imagenes.filter((x) => x.id !== img.id);
-        const next = remaining[0];
-        if (next) await setPrincipalImagen(next.id);
-      }
-    } catch (e: any) {
-      console.error(e);
-      alert(e?.message ?? "No se pudo eliminar la imagen.");
-    }
-  };
-
-  // ============================
-  // Imágenes: upload + insert DB
-  // ============================
-  const handleUploadImagen = async (file: File) => {
-    if (!productoId) {
-      alert("Primero creá el producto.");
-      return;
-    }
-
-    setUploadingImagen(true);
-
-    try {
-      // 1) subir a storage
-      const up = await uploadProductoImagen(productoId, file);
-      const path = up.path;
-
-      // 2) next orden
-      const { data: lastRow, error: lastErr } = await supabase
-        .from("imagen_producto")
-        .select("orden")
-        .eq("producto_id", productoId)
-        .order("orden", { ascending: false })
-        .limit(1)
-        .maybeSingle<{ orden: number }>();
-
-      if (lastErr) throw new Error(lastErr.message);
-      const nextOrden = (lastRow?.orden ?? 0) + 1;
-
-      // 3) si es primera imagen => principal
-      const { data: anyRow, error: anyErr } = await supabase
+    // 3) Si borraste la principal, elegimos una nueva desde DB (DB manda)
+    if (img.es_principal) {
+      const { data: actives, error: selErr } = await supabase
         .from("imagen_producto")
         .select("id")
         .eq("producto_id", productoId)
+        .is("deleted_at", null)
+        .order("orden", { ascending: true })
+        .order("creado_en", { ascending: true })
         .limit(1);
 
-      if (anyErr) throw new Error(anyErr.message);
-      const shouldBePrincipal = !anyRow || anyRow.length === 0;
+      if (selErr) {
+        console.error("[delete-image] select next principal error:", selErr);
+      } else {
+        const nextId = actives?.[0]?.id;
 
-      // 4) insert DB
-      const { data: inserted, error: insErr } = await supabase
-        .from("imagen_producto")
-        .insert({
-          producto_id: productoId,
-          url_imagen: path, // legacy
-          path: path, // ✅ canonical alineado a policies
-          orden: nextOrden,
-          es_principal: shouldBePrincipal,
-        })
-        .select(
-          "id,producto_id,url_imagen,descripcion,creado_en,orden,es_principal,path"
-        )
-        .single<ImagenProductoRow>();
+        if (nextId) {
+          // marcar nueva principal
+          const { error: pErr } = await supabase
+            .from("imagen_producto")
+            .update({ es_principal: true })
+            .eq("id", nextId)
+            .eq("producto_id", productoId)
+            .is("deleted_at", null);
 
-      if (insErr || !inserted) {
-        // si falla DB, limpiamos storage para no dejar basura
-        try {
-          await deleteProductoImagen(path);
-        } catch {}
-        throw new Error(insErr?.message || "No se pudo insertar imagen en DB.");
+          if (pErr) console.error("[delete-image] set principal error:", pErr);
+        }
       }
-
-      // 5) signed url preview (usar path canonical si existe)
-      const signedUrl = await createSignedUrl(inserted.path ?? inserted.url_imagen, 60 * 10);
-
-      setImagenes((prev) => [{ ...inserted, signedUrl }, ...prev]);
-
-      // si fue principal, forzamos consistencia
-      if (shouldBePrincipal) {
-        await setPrincipalImagen(inserted.id);
-      }
-    } catch (e: any) {
-      console.error(e);
-      alert(e?.message ?? "Error subiendo imagen.");
-    } finally {
-      setUploadingImagen(false);
     }
-  };
+
+    // 4) Storage best-effort (no bloquea DB)
+    try {
+      await deleteProductoImagen(rawPath);
+    } catch (storageErr: any) {
+      console.warn(
+        "[delete-image] storage delete best-effort falló:",
+        storageErr
+      );
+    }
+
+    // 5) Consistencia final (DB manda)
+    await fetchImagenes();
+  } catch (e: any) {
+    console.error("[handleDeleteImagen] catch:", e);
+    alert(typeof e === "string" ? e : JSON.stringify(e, null, 2));
+  }
+};
+
+
+
+
+
+// ============================
+// Imágenes: upload + insert DB (B2 runtime)
+// ============================
+const handleUploadImagen = async (file: File) => {
+  if (!productoId) {
+    alert("Primero creá el producto.");
+    return;
+  }
+
+  if (!empresaId) {
+    alert("No se encontró empresa asociada al usuario.");
+    return;
+  }
+
+  setUploadingImagen(true);
+
+  console.log("[B2] ==== PRE-FLIGHT ====");
+  const { data: userRes, error: userErr } = await supabase.auth.getUser();
+  if (userErr) {
+    console.error("[B2] getUser error:", userErr);
+    alert(userErr.message);
+    setUploadingImagen(false);
+    return;
+  }
+
+  console.log("[B2] uid:", userRes.user?.id ?? null);
+  console.log("[B2] empresaId:", empresaId ?? null);
+  console.log("[B2] productoId:", productoId ?? null);
+
+  if (!userRes.user?.id) {
+    alert("No auth (uid null)");
+    setUploadingImagen(false);
+    return;
+  }
+
+  let storagePath: string | null = null;
+
+  try {
+    // 1) subir a storage (ruta obligatoria)
+    const up = await uploadProductoImagen({ empresaId, productoId, file });
+    storagePath = up.path;
+    console.log("[B2] upload OK path:", storagePath);
+
+    // 2) next orden (SOLO activas)
+    const { data: lastRow, error: lastErr } = await supabase
+      .from("imagen_producto")
+      .select("orden")
+      .eq("producto_id", productoId)
+      .is("deleted_at", null)
+      .order("orden", { ascending: false })
+      .limit(1)
+      .maybeSingle<{ orden: number }>();
+
+    if (lastErr) throw new Error(lastErr.message);
+    const nextOrden = (lastRow?.orden ?? 0) + 1;
+
+    // 3) principal condicional SOLO activas
+    const { data: existentes, error: selErr } = await supabase
+      .from("imagen_producto")
+      .select("id, es_principal")
+      .eq("producto_id", productoId)
+      .is("deleted_at", null);
+
+    if (selErr) throw new Error(selErr.message);
+
+    const yaHayPrincipalActiva = (existentes ?? []).some(
+      (x: any) => x.es_principal === true
+    );
+    const shouldBePrincipal = !yaHayPrincipalActiva;
+
+    // 4) insert DB
+    const { data: inserted, error: insErr } = await supabase
+      .from("imagen_producto")
+      .insert({
+        producto_id: productoId,
+        url_imagen: storagePath, // legacy
+        path: storagePath, // canonical
+        orden: nextOrden,
+        es_principal: shouldBePrincipal,
+      })
+      .select(
+        "id,producto_id,url_imagen,descripcion,creado_en,orden,es_principal,path"
+      )
+      .single<ImagenProductoRow>();
+
+    if (insErr || !inserted) {
+      throw new Error(insErr?.message || "No se pudo insertar imagen en DB.");
+    }
+
+    console.log("[B2] insert OK:", inserted);
+
+    // 5) signed url preview
+    const signedUrl = await createSignedUrl(
+      inserted.path ?? inserted.url_imagen,
+      60 * 10
+    );
+    console.log("[B2] signedUrl OK");
+
+    setImagenes((prev) => [{ ...inserted, signedUrl }, ...prev]);
+
+    // 6) si fue principal, forzar consistencia
+    if (shouldBePrincipal) {
+      await setPrincipalImagen(inserted.id);
+    }
+  } catch (e: any) {
+    console.error("[B2] ERROR:", e?.message ?? e);
+
+    // compensación best-effort si DB falló o algo rompió después del upload
+    if (storagePath) {
+      try {
+        await deleteProductoImagen(storagePath);
+        console.log("[B2] compensación OK:", storagePath);
+      } catch (delErr: any) {
+        console.warn("[B2] compensación FALLÓ:", delErr?.message ?? delErr);
+      }
+    }
+
+    alert(e?.message ?? "Error subiendo imagen.");
+  } finally {
+    setUploadingImagen(false);
+  }
+};
 
   // ============================
   // 1) Traer categorías
