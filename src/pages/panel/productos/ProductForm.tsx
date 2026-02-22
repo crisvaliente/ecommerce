@@ -222,28 +222,13 @@ const [saveErr, setSaveErr] = useState<string | null>(null);
     setLoadingVariantes(false);
   };
 
-  // ============================
-  // Imágenes: fetch list + signed urls
-  // ============================
+// ============================
+// Imágenes: fetch list + signed urls
+// ============================
 const fetchImagenes = async () => {
   if (!productoId) return;
 
   setLoadingImagenes(true);
-
-  // ===== DEBUG RLS (temporal) =====
-  try {
-    const { data: jwt, error: jwtErr } = await supabase.rpc("debug_jwt", {});
-    console.log("[debug_jwt]", jwt, jwtErr);
-
-    const { data: can, error: canErr } = await supabase.rpc(
-      "can_manage_producto_member",
-      { p_producto: productoId }
-    );
-    console.log("[can_manage_producto_member]", { productoId, can, canErr });
-  } catch (e) {
-    console.log("[DEBUG RPC EXCEPTION]", e);
-  }
-  // ===============================
 
   const { data, error } = await supabase
     .from("imagen_producto")
