@@ -107,6 +107,9 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   const [saving, setSaving] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
 
+const [saveOk, setSaveOk] = useState(false);
+const [saveErr, setSaveErr] = useState<string | null>(null);
+
   const [loadingProducto, setLoadingProducto] = useState(!!productoId);
 
   // ✅ flags stock real
@@ -689,22 +692,36 @@ const handleUploadImagen = async (file: File) => {
       ? { ...basePayload, stock: Number(form.stock) }
       : basePayload;
 
-    if (productoId) {
-      const { error } = await supabase
-        .from("producto")
-        .update(payload)
-        .eq("id", productoId)
-        .eq("empresa_id", empresaId);
+if (productoId) {
+  const { data, error } = await supabase
+    .from("producto")
+    .update(payload)
+    .eq("id", productoId)
+    .eq("empresa_id", empresaId)
+    .select("id, estado, updated_at")
+    .single();
 
-      if (error) {
-        console.error("Error actualizando producto:", error);
-        alert("Error guardando producto.");
-        return { ok: false as const, id: null as string | null };
-      }
+  if (error) {
+    console.error("Error actualizando producto:", error);
+    throw error;
+  }
+  if (!data?.id) {
+    throw new Error("UPDATE no devolvió fila (0 rows?)");
+  }
 
-      setForm((p) => ({ ...p, estado: estadoToSave }));
-      return { ok: true as const, id: productoId };
-    }
+  // ✅ DB manda (tu trigger puede forzar draft)
+  const estadoDB = toProductoEstado(data.estado);
+
+  if (estadoDB !== estadoToSave) {
+    console.warn("[producto] estado override por trigger", {
+      requested: estadoToSave,
+      db: data.estado,
+    });
+  }
+
+  setForm((p) => ({ ...p, estado: estadoDB }));
+  return { ok: true as const, id: productoId };
+}
 
     const { data, error } = await supabase
       .from("producto")
@@ -740,59 +757,88 @@ const handleUploadImagen = async (file: File) => {
       );
     }
   };
+// ============================
+// 4) Guardar normal
+// ============================
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
 
-  // ============================
-  // 4) Guardar normal
-  // ============================
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  setSaving(true);
+  setSaveOk(false);
+  setSaveErr(null);
 
-    setSaving(true);
+  try {
     const res = await saveProducto();
-    setSaving(false);
-
     if (!res.ok) return;
+
+    setSaveOk(true);
 
     if (!productoId && res.id) {
       await maybeSetUsaVariantesAfterCreate(res.id);
       router.replace(`/panel/productos/${res.id}`);
       return;
     }
-  };
+  } catch (err: any) {
+    console.error("[handleSubmit] error:", err);
+    setSaveErr(err?.message ?? "Error guardando producto.");
+  } finally {
+    setSaving(false);
+  }
+};
 
   // ============================
   // 5) Transiciones de estado
   // ============================
-  const handlePublish = async () => {
-    if (transitioning || saving) return;
+const handlePublish = async () => {
+  if (transitioning || saving) return;
 
-    setTransitioning(true);
+  setTransitioning(true);
+  setSaveOk(false);
+  setSaveErr(null);
+
+  try {
     const res = await saveProducto("published");
-    setTransitioning(false);
-
     if (!res.ok) return;
+
+    setSaveOk(true);
 
     if (!productoId && res.id) {
       await maybeSetUsaVariantesAfterCreate(res.id);
       router.replace(`/panel/productos/${res.id}`);
       return;
     }
-  };
-
-  const handleDraft = async () => {
-    if (!productoId) {
-      setForm((p) => ({ ...p, estado: "draft" }));
-      return;
-    }
-
-    if (transitioning || saving) return;
-
-    setTransitioning(true);
-    const res = await saveProducto("draft");
+  } catch (err: any) {
+    console.error("[handlePublish] error:", err);
+    setSaveErr(err?.message ?? "Error publicando.");
+  } finally {
     setTransitioning(false);
+  }
+};
 
+const handleDraft = async () => {
+  if (!productoId) {
+    setForm((p) => ({ ...p, estado: "draft" }));
+    return;
+  }
+
+  if (transitioning || saving) return;
+
+  setTransitioning(true);
+  setSaveOk(false);
+  setSaveErr(null);
+
+  try {
+    const res = await saveProducto("draft");
     if (!res.ok) return;
-  };
+
+    setSaveOk(true);
+  } catch (err: any) {
+    console.error("[handleDraft] error:", err);
+    setSaveErr(err?.message ?? "Error pasando a borrador.");
+  } finally {
+    setTransitioning(false);
+  }
+};
 
   // ============================
   // Variantes: modal helpers
@@ -1536,13 +1582,25 @@ const handleUploadImagen = async (file: File) => {
       )}
 
       {/* Guardar */}
-      <button
-        type="submit"
-        disabled={saving || transitioning}
-        className="px-4 py-2 bg-black text-white rounded hover:bg-neutral-800 disabled:opacity-60"
-      >
-        {saving ? "Guardando..." : productoId ? "Guardar cambios" : "Crear producto"}
-      </button>
+<button
+  type="submit"
+  disabled={saving || transitioning}
+  className="px-4 py-2 bg-black text-white rounded hover:bg-neutral-800 disabled:opacity-60"
+>
+  {saving ? "Guardando..." : productoId ? "Guardar cambios" : "Crear producto"}
+</button>
+
+{saveErr && (
+  <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-100">
+    Error: {saveErr}
+  </div>
+)}
+
+{saveOk && !saveErr && (
+  <div className="mt-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
+    Guardado ✅
+  </div>
+)}
     </form>
   );
 };
