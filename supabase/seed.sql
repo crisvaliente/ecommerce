@@ -108,4 +108,26 @@ values
   )
 on conflict do nothing;
 
+
+-- =========================
+-- DIRECCION_USUARIO smoke B3
+-- =========================
+insert into public.direccion_usuario (
+  id,
+  usuario_id,
+  direccion,
+  ciudad,
+  pais
+)
+values (
+  '574ade8f-05bf-40f8-bc0c-2046d031a3cc',
+  'b6292efd-d976-4c74-8e56-7db42515f684',
+  'Calle Test 123',
+  'Montevideo',
+  'Uruguay'
+)
+on conflict (id) do nothing;
+
+
+
 commit;
