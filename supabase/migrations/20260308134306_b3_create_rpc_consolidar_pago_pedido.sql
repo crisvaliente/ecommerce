@@ -1,0 +1,507 @@
+create or replace function public.consolidar_pago_pedido(
+  p_intento_pago_id uuid
+)
+returns table (
+  ok boolean,
+  codigo_resultado text,
+  pedido_id uuid,
+  estado_final pedido_estado,
+  intento_pago_consolidado_id uuid
+)
+language plpgsql
+security definer
+set search_path = pg_catalog, public, pg_temp
+as $$
+declare
+  -- intento
+  v_intento_id uuid;
+  v_pedido_id uuid;
+  v_empresa_id uuid;
+  v_intento_estado intento_pago_estado;
+
+  -- pedido
+  v_pedido_estado pedido_estado;
+  v_pedido_empresa_id uuid;
+  v_pedido_expira_en timestamptz;
+  v_pedido_intento_pago_consolidado_id uuid;
+
+  -- control general
+  v_rows_updated bigint;
+  v_falta_stock boolean;
+
+  -- control sets / locking
+  v_simple_count bigint;
+  v_variante_count bigint;
+  v_simple_locked_count bigint;
+  v_variante_locked_count bigint;
+begin
+  /*
+    ============================================================
+    BLOQUE 1 — Resolver intento_pago y cortar temprano
+    ============================================================
+  */
+  select
+    ip.id,
+    ip.pedido_id,
+    ip.empresa_id,
+    ip.estado
+  into
+    v_intento_id,
+    v_pedido_id,
+    v_empresa_id,
+    v_intento_estado
+  from public.intento_pago ip
+  where ip.id = p_intento_pago_id;
+
+  if not found then
+    return query
+    select
+      false::boolean,
+      'intento_no_existe'::text,
+      null::uuid,
+      null::pedido_estado,
+      null::uuid;
+    return;
+  end if;
+
+  if v_intento_estado <> 'aprobado'::intento_pago_estado then
+    return query
+    select
+      false::boolean,
+      'intento_no_aprobado'::text,
+      v_pedido_id,
+      null::pedido_estado,
+      null::uuid;
+    return;
+  end if;
+
+  /*
+    ============================================================
+    BLOQUE 2 — Lock de pedido, coherencia e idempotencia
+    ============================================================
+  */
+  select
+    p.estado,
+    p.empresa_id,
+    p.expira_en,
+    p.intento_pago_consolidado_id
+  into
+    v_pedido_estado,
+    v_pedido_empresa_id,
+    v_pedido_expira_en,
+    v_pedido_intento_pago_consolidado_id
+  from public.pedido p
+  where p.id = v_pedido_id
+  for update;
+
+  if not found then
+    raise exception
+      'integridad_inesperada: pedido % inexistente para intento_pago %',
+      v_pedido_id,
+      v_intento_id;
+  end if;
+
+  if v_pedido_empresa_id <> v_empresa_id then
+    return query
+    select
+      false::boolean,
+      'intento_pedido_inconsistente'::text,
+      v_pedido_id,
+      v_pedido_estado,
+      null::uuid;
+    return;
+  end if;
+
+  if v_pedido_intento_pago_consolidado_id is not null
+     and v_pedido_estado <> 'pagado'::pedido_estado then
+    raise exception
+      'integridad_inesperada: pedido % tiene intento consolidado % pero estado=%',
+      v_pedido_id,
+      v_pedido_intento_pago_consolidado_id,
+      v_pedido_estado;
+  end if;
+
+  if v_pedido_intento_pago_consolidado_id is not null then
+    if v_pedido_intento_pago_consolidado_id = p_intento_pago_id then
+      return query
+      select
+        true::boolean,
+        'idempotente'::text,
+        v_pedido_id,
+        v_pedido_estado,
+        v_pedido_intento_pago_consolidado_id;
+      return;
+    end if;
+
+    return query
+    select
+      false::boolean,
+      'pedido_ya_consolidado_por_otro_intento'::text,
+      v_pedido_id,
+      v_pedido_estado,
+      v_pedido_intento_pago_consolidado_id;
+    return;
+  end if;
+
+  /*
+    ============================================================
+    BLOQUE 3 — Consolidabilidad normal
+    ============================================================
+  */
+  if v_pedido_estado <> 'pendiente_pago'::pedido_estado then
+    return query
+    select
+      false::boolean,
+      'pedido_no_consolidable'::text,
+      v_pedido_id,
+      v_pedido_estado,
+      null::uuid;
+    return;
+  end if;
+
+  if v_pedido_expira_en is null then
+    raise exception
+      'integridad_inesperada: pedido % sin expira_en',
+      v_pedido_id;
+  end if;
+
+  if now() > v_pedido_expira_en then
+    return query
+    select
+      false::boolean,
+      'pedido_expirado'::text,
+      v_pedido_id,
+      v_pedido_estado,
+      null::uuid;
+    return;
+  end if;
+
+  /*
+    ============================================================
+    BLOQUE 4 — pedido_item + fuente física + agregación + locking
+    ============================================================
+  */
+
+  -- 4.1) pedido sin items => inconsistencia
+  if not exists (
+    select 1
+    from public.pedido_item pi
+    where pi.pedido_id = v_pedido_id
+  ) then
+    raise exception
+      'integridad_inesperada: pedido % no tiene items',
+      v_pedido_id;
+  end if;
+
+  -- 4.2) producto_id nulo => inconsistencia
+  if exists (
+    select 1
+    from public.pedido_item pi
+    where pi.pedido_id = v_pedido_id
+      and pi.producto_id is null
+  ) then
+    raise exception
+      'integridad_inesperada: pedido % tiene items sin producto_id',
+      v_pedido_id;
+  end if;
+
+  -- 4.2-bis) cantidad inválida => inconsistencia
+  if exists (
+    select 1
+    from public.pedido_item pi
+    where pi.pedido_id = v_pedido_id
+      and pi.cantidad <= 0
+  ) then
+    raise exception
+      'integridad_inesperada: pedido % tiene items con cantidad <= 0',
+      v_pedido_id;
+  end if;
+
+  -- 4.3) sets auxiliares temporales
+  create temporary table if not exists pg_temp.tmp_stock_simple_requerido (
+    producto_id uuid primary key,
+    cantidad_requerida integer not null
+  ) on commit drop;
+
+  truncate pg_temp.tmp_stock_simple_requerido;
+
+  create temporary table if not exists pg_temp.tmp_stock_variante_requerido (
+    producto_variante_id uuid primary key,
+    producto_id uuid not null,
+    cantidad_requerida integer not null
+  ) on commit drop;
+
+  truncate pg_temp.tmp_stock_variante_requerido;
+
+  -- 4.4) si producto usa variantes, el item debe traer variante válida y consistente
+  if exists (
+    select 1
+    from public.pedido_item pi
+    join public.producto pr
+      on pr.id = pi.producto_id
+    left join public.producto_variante pv
+      on pv.id = pi.variante_id
+    where pi.pedido_id = v_pedido_id
+      and pr.usa_variantes = true
+      and (
+        pi.variante_id is null
+        or pv.id is null
+        or pv.producto_id <> pi.producto_id
+        or pv.empresa_id <> v_empresa_id
+      )
+  ) then
+    raise exception
+      'integridad_inesperada: pedido % tiene items con variante inválida o inconsistente',
+      v_pedido_id;
+  end if;
+
+  -- 4.4-bis) si producto NO usa variantes, el item no debe traer variante_id
+  if exists (
+    select 1
+    from public.pedido_item pi
+    join public.producto pr
+      on pr.id = pi.producto_id
+    where pi.pedido_id = v_pedido_id
+      and pr.usa_variantes = false
+      and pi.variante_id is not null
+  ) then
+    raise exception
+      'integridad_inesperada: pedido % tiene items simples con variante_id informado',
+      v_pedido_id;
+  end if;
+
+  -- 4.5) stock simple agregado
+  insert into pg_temp.tmp_stock_simple_requerido (
+    producto_id,
+    cantidad_requerida
+  )
+  select
+    pi.producto_id,
+    sum(pi.cantidad)::integer
+  from public.pedido_item pi
+  join public.producto pr
+    on pr.id = pi.producto_id
+  where pi.pedido_id = v_pedido_id
+    and pr.usa_variantes = false
+  group by pi.producto_id;
+
+  -- 4.6) stock por variante agregado
+  insert into pg_temp.tmp_stock_variante_requerido (
+    producto_variante_id,
+    producto_id,
+    cantidad_requerida
+  )
+  select
+    pv.id as producto_variante_id,
+    pv.producto_id,
+    sum(pi.cantidad)::integer
+  from public.pedido_item pi
+  join public.producto pr
+    on pr.id = pi.producto_id
+  join public.producto_variante pv
+    on pv.id = pi.variante_id
+   and pv.producto_id = pi.producto_id
+   and pv.empresa_id = v_empresa_id
+  where pi.pedido_id = v_pedido_id
+    and pr.usa_variantes = true
+  group by pv.id, pv.producto_id;
+
+  -- 4.7) si hay items pero no surgió ninguna fuente válida de stock => inconsistencia
+  if not exists (select 1 from pg_temp.tmp_stock_simple_requerido)
+     and not exists (select 1 from pg_temp.tmp_stock_variante_requerido) then
+    raise exception
+      'integridad_inesperada: pedido % no produjo fuentes válidas de stock',
+      v_pedido_id;
+  end if;
+
+  -- 4.8) cardinalidad esperada de sets
+  select count(*)
+  into v_simple_count
+  from pg_temp.tmp_stock_simple_requerido;
+
+  select count(*)
+  into v_variante_count
+  from pg_temp.tmp_stock_variante_requerido;
+
+  -- 4.9) locking determinístico + cardinalidad defensiva
+  select count(*)
+  into v_simple_locked_count
+  from (
+    select p.id
+    from public.producto p
+    join pg_temp.tmp_stock_simple_requerido req
+      on req.producto_id = p.id
+    order by p.id
+    for update
+  ) s;
+
+  if v_simple_locked_count <> v_simple_count then
+    raise exception
+      'integridad_inesperada: lock de producto en pedido % esperaba % filas y bloqueó %',
+      v_pedido_id,
+      v_simple_count,
+      v_simple_locked_count;
+  end if;
+
+  select count(*)
+  into v_variante_locked_count
+  from (
+    select pv.id
+    from public.producto_variante pv
+    join pg_temp.tmp_stock_variante_requerido req
+      on req.producto_variante_id = pv.id
+    order by pv.id
+    for update
+  ) s;
+
+  if v_variante_locked_count <> v_variante_count then
+    raise exception
+      'integridad_inesperada: lock de producto_variante en pedido % esperaba % filas y bloqueó %',
+      v_pedido_id,
+      v_variante_count,
+      v_variante_locked_count;
+  end if;
+
+  /*
+    ============================================================
+    BLOQUE 5 — Validar disponibilidad y ruta bloqueo terminal
+    ============================================================
+  */
+  select
+    (
+      exists (
+        select 1
+        from public.producto p
+        join pg_temp.tmp_stock_simple_requerido req
+          on req.producto_id = p.id
+        where p.stock < req.cantidad_requerida
+      )
+      or
+      exists (
+        select 1
+        from public.producto_variante pv
+        join pg_temp.tmp_stock_variante_requerido req
+          on req.producto_variante_id = pv.id
+        where pv.stock < req.cantidad_requerida
+      )
+    )
+  into v_falta_stock;
+
+  if v_falta_stock then
+    update public.pedido p
+    set
+      estado = 'bloqueado'::pedido_estado,
+      bloqueado_por_stock = true,
+      intento_pago_consolidado_id = null
+    where p.id = v_pedido_id;
+
+    get diagnostics v_rows_updated = row_count;
+
+    if v_rows_updated <> 1 then
+      raise exception
+        'integridad_inesperada: update bloqueo pedido % afectó % filas',
+        v_pedido_id,
+        v_rows_updated;
+    end if;
+
+    return query
+    select
+      true::boolean,
+      'bloqueado_sin_stock'::text,
+      v_pedido_id,
+      'bloqueado'::pedido_estado,
+      null::uuid;
+    return;
+  end if;
+
+  /*
+    ============================================================
+    BLOQUE 6 — Ruta éxito ejecutable
+    ============================================================
+  */
+
+  -- 6.1) Descontar stock simple
+  update public.producto p
+  set stock = p.stock - req.cantidad_requerida
+  from pg_temp.tmp_stock_simple_requerido req
+  where p.id = req.producto_id;
+
+  get diagnostics v_rows_updated = row_count;
+
+  if v_rows_updated <> v_simple_count then
+    raise exception
+      'integridad_inesperada: update stock simple en pedido % esperaba % filas y afectó %',
+      v_pedido_id,
+      v_simple_count,
+      v_rows_updated;
+  end if;
+
+  if exists (
+    select 1
+    from public.producto p
+    join pg_temp.tmp_stock_simple_requerido req
+      on req.producto_id = p.id
+    where p.stock < 0
+  ) then
+    raise exception
+      'integridad_inesperada: stock simple negativo post-descuento en pedido %',
+      v_pedido_id;
+  end if;
+
+  -- 6.2) Descontar stock por variante
+  update public.producto_variante pv
+  set stock = pv.stock - req.cantidad_requerida
+  from pg_temp.tmp_stock_variante_requerido req
+  where pv.id = req.producto_variante_id;
+
+  get diagnostics v_rows_updated = row_count;
+
+  if v_rows_updated <> v_variante_count then
+    raise exception
+      'integridad_inesperada: update stock variante en pedido % esperaba % filas y afectó %',
+      v_pedido_id,
+      v_variante_count,
+      v_rows_updated;
+  end if;
+
+  if exists (
+    select 1
+    from public.producto_variante pv
+    join pg_temp.tmp_stock_variante_requerido req
+      on req.producto_variante_id = pv.id
+    where pv.stock < 0
+  ) then
+    raise exception
+      'integridad_inesperada: stock variante negativo post-descuento en pedido %',
+      v_pedido_id;
+  end if;
+
+  -- 6.3) Promover pedido a pagado y registrar intento consolidado
+  update public.pedido p
+  set
+    estado = 'pagado'::pedido_estado,
+    intento_pago_consolidado_id = p_intento_pago_id,
+    bloqueado_por_stock = false
+  where p.id = v_pedido_id;
+
+  get diagnostics v_rows_updated = row_count;
+
+  if v_rows_updated <> 1 then
+    raise exception
+      'integridad_inesperada: update pago pedido % afectó % filas',
+      v_pedido_id,
+      v_rows_updated;
+  end if;
+
+  -- 6.4) Retorno final soberano
+  return query
+  select
+    true::boolean,
+    'consolidado'::text,
+    v_pedido_id,
+    'pagado'::pedido_estado,
+    p_intento_pago_id;
+  return;
+
+end;
+$$;
