@@ -1,5 +1,4 @@
 // /pages/debug/auth.tsx
-// Debug Auth / RLS — versión limpia sin modificar nombres reales
 import { useState } from "react";
 import { supabase } from "../../lib/supabaseClient";
 import { useAuth } from "../../context/AuthContext";
@@ -20,13 +19,13 @@ export default function DebugAuth() {
     setLog(JSON.stringify({ step: "readOwn", data, error }, null, 2));
   };
 
-  // UPDATE propio (sin ensuciar nombre)
+  // UPDATE propio
   const runUpdateOwn = async () => {
     const u = (await supabase.auth.getUser()).data.user;
     const { data, error } = await supabase
       .from("usuario")
       .update({
-        updated_at: new Date().toISOString(), // Campo “seguro”
+        updated_at: new Date().toISOString(),
       })
       .eq("supabase_uid", u?.id)
       .select()
@@ -35,7 +34,7 @@ export default function DebugAuth() {
     setLog(JSON.stringify({ step: "updateOwn", data, error }, null, 2));
   };
 
-  // UPDATE otro usuario (RLS debe bloquearlo)
+  // UPDATE otro usuario
   const runUpdateOther = async () => {
     const otherUid = prompt("Pegá aquí el supabase_uid de OTRO usuario:");
     if (!otherUid) return;
@@ -47,7 +46,80 @@ export default function DebugAuth() {
       .select()
       .maybeSingle();
 
-    setLog(JSON.stringify({ step: "updateOther (debería fallar)", data, error }, null, 2));
+    setLog(
+      JSON.stringify(
+        { step: "updateOther (debería fallar)", data, error },
+        null,
+        2
+      )
+    );
+  };
+
+  // TEST GET /api/ecommerce/pedido/:id
+  const runGetPedido = async () => {
+    const pedidoId = prompt("Pegá aquí el pedido_id a probar:");
+    if (!pedidoId) return;
+
+    try {
+      const {
+        data: { session },
+        error: sessErr,
+      } = await supabase.auth.getSession();
+
+      const accessToken = session?.access_token ?? null;
+
+      if (sessErr || !accessToken) {
+        setLog(
+          JSON.stringify(
+            {
+              step: "getPedido",
+              phase: "getSession",
+              accessTokenFound: Boolean(accessToken),
+              sessionError: sessErr ?? null,
+              error: "missing_access_token",
+            },
+            null,
+            2
+          )
+        );
+        return;
+      }
+
+      const r = await fetch(`/api/ecommerce/pedido/${pedidoId}`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      const body = await r.json().catch(() => null);
+
+      setLog(
+        JSON.stringify(
+          {
+            step: "getPedido",
+            pedidoId,
+            status: r.status,
+            ok: r.ok,
+            body,
+          },
+          null,
+          2
+        )
+      );
+    } catch (error) {
+      setLog(
+        JSON.stringify(
+          {
+            step: "getPedido",
+            error:
+              error instanceof Error ? error.message : "unexpected_error",
+          },
+          null,
+          2
+        )
+      );
+    }
   };
 
   return (
@@ -60,20 +132,34 @@ export default function DebugAuth() {
         &nbsp;dbUser: {dbUser ? dbUser.supabase_uid : "null"}
       </p>
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-        <button onClick={refresh} style={btn}>Refresh</button>
-        <button onClick={runReadOwn} style={btn}>SELECT propio</button>
-        <button onClick={runUpdateOwn} style={btn}>UPDATE propio</button>
-        <button onClick={runUpdateOther} style={btnDanger}>UPDATE OTRO (debe fallar)</button>
-        <button onClick={signOut} style={btnSecondary}>Sign out</button>
+      <div
+        style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}
+      >
+        <button onClick={refresh} style={btn}>
+          Refresh
+        </button>
+        <button onClick={runReadOwn} style={btn}>
+          SELECT propio
+        </button>
+        <button onClick={runUpdateOwn} style={btn}>
+          UPDATE propio
+        </button>
+        <button onClick={runUpdateOther} style={btnDanger}>
+          UPDATE OTRO (debe fallar)
+        </button>
+        <button onClick={runGetPedido} style={btn}>
+          TEST GET PEDIDO
+        </button>
+        <button onClick={signOut} style={btnSecondary}>
+          Sign out
+        </button>
       </div>
 
-      <pre style={preStyle}>
-        {log || "Logs aquí..."}
-      </pre>
+      <pre style={preStyle}>{log || "Logs aquí..."}</pre>
 
       <p style={{ marginTop: 16, opacity: 0.8 }}>
-        Tip: para conseguir el UID de otro usuario: Supabase Studio → Authentication → Users → copia el <code>id</code>.
+        Tip: para conseguir el UID de otro usuario: Supabase Studio →
+        Authentication → Users → copia el <code>id</code>.
       </p>
     </main>
   );
