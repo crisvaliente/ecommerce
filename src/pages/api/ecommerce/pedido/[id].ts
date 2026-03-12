@@ -42,19 +42,10 @@ function getAccessToken(req: NextApiRequest): string | null {
     return null;
   }
 
-  // intento clásico
-  let m = cookie.match(/(?:^|;\s*)sb-access-token=([^;]+)/);
+  const m = cookie.match(/(?:^|;\s*)sb-access-token=([^;]+)/);
   if (m?.[1]) {
     return decodeURIComponent(m[1]);
   }
-
-  // diagnóstico: mostrar cookies sb-* reales
-  const cookieNames = cookie
-    .split(";")
-    .map((c) => c.trim().split("=")[0])
-    .filter((name) => name.startsWith("sb-"));
-
-  console.log("[pedido/:id] sb cookies", cookieNames);
 
   return null;
 }
@@ -84,16 +75,7 @@ export default async function handler(
   }
 
   try {
-    console.log("[pedido/:id] auth header", req.headers.authorization ?? null);
-    console.log("[pedido/:id] cookie header", req.headers.cookie ?? null);
-
     const accessToken = getAccessToken(req);
-
-    console.log("[pedido/:id] accessToken found", Boolean(accessToken));
-    console.log(
-      "[pedido/:id] accessToken preview",
-      accessToken ? `${accessToken.slice(0, 20)}...` : null
-    );
 
     if (!accessToken) {
       return res.status(401).json({ error: "unauthorized" });
@@ -113,9 +95,6 @@ export default async function handler(
 
     const { data: userData, error: userErr } =
       await supabaseAuth.auth.getUser();
-
-    console.log("[pedido/:id] userErr", userErr);
-    console.log("[pedido/:id] userId", userData?.user?.id ?? null);
 
     if (userErr || !userData?.user) {
       return res.status(401).json({ error: "unauthorized" });
