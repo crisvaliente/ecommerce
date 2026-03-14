@@ -151,6 +151,29 @@ The sequence must cover:
 15. verify `/panel/pedidos/[id]`
 16. close the run with a final result
 
+Additional refinement requirements for the produced live playbook:
+
+- In **Step 10 — Verify webhook receipt**:
+  - after:
+    - `Do not continue if`
+    - `no webhook evidence exists after a reasonable wait`
+  - add an operational note stating:
+    - allow a short controlled wait window before classifying webhook receipt as failed
+
+- In **Step 14 — Verify /panel/pedidos**:
+  - after:
+    - `Do not continue if`
+    - `the order is missing or values visibly diverge from DB`
+  - add an operational note stating:
+    - allow a manual refresh/reload before classifying this as panel inconsistency
+
+- In **Step 15 — Verify /panel/pedidos/[id]**:
+  - after:
+    - `Do not continue if`
+    - `panel detail is inconsistent with DB`
+  - add an operational note stating:
+    - allow a manual refresh/reload before classifying this as panel inconsistency
+
 ## 4. Gate checks
 
 Create a compact gate list for the operator.
@@ -173,6 +196,11 @@ For each gate, explain:
 - what proves the gate passed
 - what blocks the run
 - whether the next step is allowed
+
+Additional refinement requirement for **Gate 8 — `intento_pago` updated**:
+
+- replace the default “Passes if” wording with a stricter version that says:
+  - it passes if `external_id`, `notificado_en`, and payment-related metadata are persisted, and `intento_pago.estado = aprobado` or the exact implemented success-equivalent state confirmed in the repository
 
 ## 5. Evidence to capture during execution
 
