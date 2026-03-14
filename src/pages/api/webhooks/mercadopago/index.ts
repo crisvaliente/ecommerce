@@ -43,9 +43,11 @@ type ApiOk =
       reason:
         | "not_payment_event"
         | "missing_payment_id"
+        | "payment_lookup_failed"
         | "payment_without_external_reference"
         | "payment_not_correlatable"
         | "payment_status_ignored";
+      paymentId?: string;
     }
   | {
       ok: true;
@@ -234,7 +236,26 @@ export default async function handler(
   });
 
   try {
-    const mpPayment = await fetchMpPayment(paymentId);
+    let mpPayment: MpPaymentResponse;
+
+    try {
+      mpPayment = await fetchMpPayment(paymentId);
+    } catch (err) {
+      console.warn("[mp-webhook] payment lookup failed", {
+        paymentId,
+        eventType,
+        action: body.action ?? null,
+        reason: "payment_lookup_failed",
+        detail: err instanceof Error ? err.message : "unknown_error",
+      });
+
+      return res.status(200).json({
+        ok: true,
+        absorbed: true,
+        reason: "payment_lookup_failed",
+        paymentId,
+      });
+    }
 
     const externalId = String(mpPayment.id);
     const externalReference = mpPayment.external_reference?.trim() ?? null;
