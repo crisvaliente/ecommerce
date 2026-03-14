@@ -122,6 +122,77 @@ export default function DebugAuth() {
     }
   };
 
+  // TEST POST /api/ecommerce/intento-pago
+  const runPostIntentoPago = async () => {
+    const pedidoId = prompt("Pegá aquí el pedido_id a probar:");
+    if (!pedidoId) return;
+
+    try {
+      const {
+        data: { session },
+        error: sessErr,
+      } = await supabase.auth.getSession();
+
+      const accessToken = session?.access_token ?? null;
+
+      if (sessErr || !accessToken) {
+        setLog(
+          JSON.stringify(
+            {
+              step: "postIntentoPago",
+              phase: "getSession",
+              accessTokenFound: Boolean(accessToken),
+              sessionError: sessErr ?? null,
+              error: "missing_access_token",
+            },
+            null,
+            2
+          )
+        );
+        return;
+      }
+
+      const r = await fetch("/api/ecommerce/intento-pago", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          pedido_id: pedidoId,
+        }),
+      });
+
+      const body = await r.json().catch(() => null);
+
+      setLog(
+        JSON.stringify(
+          {
+            step: "postIntentoPago",
+            pedidoId,
+            status: r.status,
+            ok: r.ok,
+            body,
+          },
+          null,
+          2
+        )
+      );
+    } catch (error) {
+      setLog(
+        JSON.stringify(
+          {
+            step: "postIntentoPago",
+            error:
+              error instanceof Error ? error.message : "unexpected_error",
+          },
+          null,
+          2
+        )
+      );
+    }
+  };
+
   return (
     <main style={{ padding: 24, fontFamily: "ui-sans-serif" }}>
       <h1 style={{ fontSize: 24, marginBottom: 8 }}>Debug Auth / RLS</h1>
@@ -149,6 +220,9 @@ export default function DebugAuth() {
         </button>
         <button onClick={runGetPedido} style={btn}>
           TEST GET PEDIDO
+        </button>
+        <button onClick={runPostIntentoPago} style={btn}>
+          TEST POST INTENTO
         </button>
         <button onClick={signOut} style={btnSecondary}>
           Sign out
