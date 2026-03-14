@@ -26,6 +26,11 @@ const links: PanelLink[] = [
     allowedRoles: ["admin", "desarrollador"],
   },
   {
+    href: "/panel/pedidos",
+    label: "Pedidos",
+    allowedRoles: ["admin", "desarrollador"],
+  },
+  {
     href: "/panel/payments",
     label: "Pagos",
     allowedRoles: ["admin"],
