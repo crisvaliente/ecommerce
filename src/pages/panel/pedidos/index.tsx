@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import AdminLayout from "../../../components/layout/AdminLayout";
 import { supabase } from "../../../lib/supabaseClient";
 
@@ -195,9 +196,12 @@ const PanelPedidosPage: React.FC = () => {
                   </td>
 
                   <td className="px-4 py-2 text-right">
-                    <span className="text-xs font-medium text-slate-500">
-                      Detalle próximamente
-                    </span>
+                    <Link
+                      href={`/panel/pedidos/${pedido.pedido_id}`}
+                      className="text-xs font-medium text-emerald-400 hover:underline"
+                    >
+                      Ver detalle
+                    </Link>
                   </td>
                 </tr>
               ))}
