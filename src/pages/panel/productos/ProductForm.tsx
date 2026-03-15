@@ -96,6 +96,11 @@ type ImagenProductoUI = ImagenProductoRow & {
   signedUrl?: string;
 };
 
+type PublishChecklistItem = {
+  label: string;
+  done: boolean;
+};
+
 const ProductForm: React.FC<Props> = ({ productoId }) => {
   const router = useRouter();
   const { dbUser } = useAuth();
@@ -141,6 +146,30 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
       cls: "bg-amber-600/20 text-amber-200 border-amber-500/40",
     };
   }, [form.estado]);
+
+  const publishChecklist = useMemo<PublishChecklistItem[]>(() => {
+    return [
+      {
+        label: "Nombre del producto",
+        done: form.nombre.trim().length > 0,
+      },
+      {
+        label: "Precio valido",
+        done: Number.isFinite(Number(form.precio)) && Number(form.precio) > 0,
+      },
+      {
+        label: usaVariantes ? "Stock por talles configurado" : "Stock general configurado",
+        done: usaVariantes || (Number.isFinite(Number(form.stock)) && Number(form.stock) >= 0),
+      },
+      {
+        label: "Categoria o descripcion opcional revisada",
+        done: Boolean(form.categoria_id || form.descripcion.trim().length > 0),
+      },
+    ];
+  }, [form.categoria_id, form.descripcion, form.nombre, form.precio, form.stock, usaVariantes]);
+
+  const publishReadyCount = publishChecklist.filter((item) => item.done).length;
+  const publishReady = publishReadyCount === publishChecklist.length;
 
   // ============================
   // Variantes state
@@ -1090,7 +1119,11 @@ const handleDraft = async () => {
   };
 
   if (loadingProducto) {
-    return <div className="p-4">Cargando producto...</div>;
+    return (
+      <div className="rounded-xl border border-white/10 bg-white/5 p-6 text-sm text-white/80">
+        Estamos cargando la ficha del producto.
+      </div>
+    );
   }
 
   const showStockLegacyInput = !usaVariantes;
@@ -1105,7 +1138,7 @@ const handleDraft = async () => {
               : "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
           }`}
         >
-          {saveErr ? `Error: ${saveErr}` : saveMessage}
+          {saveErr ? `No pudimos guardar los cambios: ${saveErr}` : saveMessage}
         </div>
       )}
 
@@ -1121,45 +1154,79 @@ const handleDraft = async () => {
 
           {form.estado === "draft" ? (
             <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
-              Este producto está en <b>borrador</b>. No debería mostrarse en la tienda hasta publicarlo.
+              Este producto esta en <b>borrador</b>. Todavia no aparece en la tienda.
             </div>
           ) : (
             <div className="mt-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
-              Este producto está <b>publicado</b>. Se considera visible en la tienda.
+              Este producto esta <b>publicado</b> y listo para verse en la tienda.
             </div>
           )}
 
-          {/* Resumen stock */}
           <div className="mt-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="font-medium text-white/90">Stock visible hoy:</span>
+              <span className="font-medium text-white/90">Stock disponible hoy:</span>
               <span className="font-semibold text-white">
                 {typeof stockTotal === "number" ? stockTotal : "—"}
               </span>
               {usaVariantes ? (
-                  <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-100">
-                  calculado por variantes
-                  </span>
+                <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-100">
+                  stock por talle
+                </span>
               ) : (
                 <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-xs text-white/70">
-                  stock simple
+                  stock general
                 </span>
               )}
             </div>
 
             {usaVariantes ? (
               <div className="mt-1 text-xs text-white/60">
-                El stock se controla desde variantes. En este formulario ya no editás stock directo.
+                El stock se organiza desde las variantes. En esta ficha no editas un unico stock general.
               </div>
             ) : (
               <div className="mt-1 text-xs text-white/60">
-                En este producto simple, el campo Stock de abajo es el stock operativo que estás editando.
+                Este numero es el stock que estas administrando para vender este producto.
               </div>
             )}
           </div>
+
+          <div className="mt-2 rounded-lg border border-white/10 bg-black/10 px-3 py-3 text-sm text-white/80">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="font-medium text-white/90">Listo para publicar</p>
+              <span
+                className={
+                  "rounded-full px-2 py-0.5 text-xs font-medium " +
+                  (publishReady
+                    ? "bg-emerald-500/15 text-emerald-100"
+                    : "bg-amber-500/15 text-amber-100")
+                }
+              >
+                {publishReady ? "Listo" : `${publishReadyCount}/${publishChecklist.length} completo`}
+              </span>
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              {publishChecklist.map((item) => (
+                <div
+                  key={item.label}
+                  className="flex items-center gap-2 rounded-lg bg-white/5 px-2.5 py-2 text-xs"
+                >
+                  <span
+                    className={
+                      "inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold " +
+                      (item.done
+                        ? "bg-emerald-500/20 text-emerald-100"
+                        : "bg-white/10 text-white/60")
+                    }
+                  >
+                    {item.done ? "OK" : "-"}
+                  </span>
+                  <span className={item.done ? "text-white/90" : "text-white/60"}>{item.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
 
-        {/* Acciones de estado */}
         <div className="flex flex-col gap-2 sm:flex-row">
           {form.estado === "draft" ? (
             <button
@@ -1168,7 +1235,7 @@ const handleDraft = async () => {
               disabled={saving || transitioning}
               className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-60"
             >
-              {transitioning ? "Publicando..." : "Publicar"}
+              {transitioning ? "Publicando..." : "Publicar en tienda"}
             </button>
           ) : (
             <button
@@ -1177,151 +1244,157 @@ const handleDraft = async () => {
               disabled={saving || transitioning}
               className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm font-medium text-amber-100 hover:bg-amber-500/20 disabled:opacity-60"
             >
-              {transitioning ? "Pasando a borrador..." : "Pasar a borrador"}
+              {transitioning ? "Pasando a borrador..." : "Ocultar y pasar a borrador"}
             </button>
           )}
         </div>
       </div>
 
-      {/* Datos principales */}
       <section className="space-y-5 rounded-lg border border-white/10 bg-white/5 p-4">
         <div>
           <h2 className="text-base font-semibold text-white">Datos principales</h2>
           <p className="mt-1 text-sm text-white/60">
-            Completá este bloque para crear o editar un producto simple.
+            Completa la informacion esencial del producto. Lo demas puedes sumarlo despues.
           </p>
         </div>
 
-        {/* ✅ Capa 2 (solo /nuevo): opción "Crear en modo variantes" */}
         {!productoId && (
           <div className="rounded-lg border border-white/10 bg-black/10 p-3">
-          <label className="flex items-start gap-3 text-sm text-white/90">
-            <input
-              type="checkbox"
-              className="mt-1 h-4 w-4"
-              checked={crearEnModoVariantes}
-              onChange={(e) => setCrearEnModoVariantes(e.target.checked)}
-            />
-            <span>
-              <span className="font-medium">Crear en modo variantes</span>
-              <span className="block text-xs text-white/60">
-                Opcional. Si no lo activás, podés crear primero un producto simple y publicarlo más rápido.
+            <label className="flex items-start gap-3 text-sm text-white/90">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4"
+                checked={crearEnModoVariantes}
+                onChange={(e) => setCrearEnModoVariantes(e.target.checked)}
+              />
+              <span>
+                <span className="font-medium">Crear con variantes desde el inicio</span>
+                <span className="block text-xs text-white/60">
+                  Opcional. Si prefieres avanzar rapido, puedes crear un producto simple y sumar talles despues.
+                </span>
               </span>
-            </span>
-          </label>
+            </label>
           </div>
         )}
 
-        {/* Nombre */}
         <div>
-        <label className="block font-medium">Nombre *</label>
-        <input
-          type="text"
-          name="nombre"
-          className="border rounded w-full px-3 py-2"
-          value={form.nombre}
-          onChange={handleChange}
-          required
-        />
+          <label className="block font-medium">Nombre *</label>
+          <input
+            type="text"
+            name="nombre"
+            className="border rounded w-full px-3 py-2"
+            value={form.nombre}
+            onChange={handleChange}
+            required
+          />
+          <div className="mt-1 text-xs text-white/60">
+            Usa el nombre con el que quieres mostrarlo en la tienda.
+          </div>
         </div>
 
-        {/* Descripción */}
         <div>
-        <label className="block font-medium">Descripción</label>
-        <textarea
-          name="descripcion"
-          className="border rounded w-full px-3 py-2"
-          value={form.descripcion}
-          onChange={handleChange}
-        />
-        <div className="mt-1 text-xs text-white/60">Opcional. Podés completarla más adelante.</div>
+          <label className="block font-medium">Descripcion</label>
+          <textarea
+            name="descripcion"
+            className="border rounded w-full px-3 py-2"
+            value={form.descripcion}
+            onChange={handleChange}
+          />
+          <div className="mt-1 text-xs text-white/60">
+            Opcional. Suma contexto util para quien compra.
+          </div>
         </div>
 
-        {/* Precio */}
         <div>
-        <label className="block font-medium">Precio *</label>
-        <input
-          type="number"
-          name="precio"
-          className="border rounded w-full px-3 py-2"
-          value={form.precio}
-          onChange={handleChange}
-          required
-        />
+          <label className="block font-medium">Precio *</label>
+          <input
+            type="number"
+            name="precio"
+            className="border rounded w-full px-3 py-2"
+            value={form.precio}
+            onChange={handleChange}
+            required
+          />
+          <div className="mt-1 text-xs text-white/60">
+            Ingresa el precio final con el que saldra publicado.
+          </div>
         </div>
 
-        {/* Stock legacy (solo si NO usa variantes) */}
         {showStockLegacyInput && (
           <div className="rounded-lg border border-white/10 bg-black/10 p-3">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="font-medium text-white/90">Stock simple</div>
-              <div className="text-xs text-white/60">
-                Este es el stock que se usa en la operación normal mientras el producto no trabaje con variantes.
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="font-medium text-white/90">Stock general</div>
+                <div className="text-xs text-white/60">
+                  Mientras no uses variantes, este es el stock que ve y compra tu cliente.
+                </div>
               </div>
+
+              <button
+                type="button"
+                onClick={handlePasarAVariantes}
+                disabled={!productoId || switchingToVariantes}
+                className="rounded-lg bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/15 disabled:opacity-60"
+                title={!productoId ? "Primero crea el producto" : "Pasar a variantes"}
+              >
+                {switchingToVariantes ? "Pasando..." : "Organizar por talles"}
+              </button>
             </div>
 
-            <button
-              type="button"
-              onClick={handlePasarAVariantes}
-              disabled={!productoId || switchingToVariantes}
-              className="rounded-lg bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/15 disabled:opacity-60"
-              title={!productoId ? "Primero creá el producto" : "Pasar a modo variantes"}
-            >
-              {switchingToVariantes ? "Pasando..." : "Pasar a variantes"}
-            </button>
-          </div>
-
-          <div className="mt-3">
-            <label className="block font-medium">Stock</label>
-            <input
-              type="number"
-              name="stock"
-              className="border rounded w-full px-3 py-2"
-              value={form.stock}
-              onChange={handleChange}
-              required
-              min={0}
-            />
-            <div className="mt-1 text-xs text-white/60">Obligatorio para el camino simple. Es el stock que se descuenta mientras el producto no use variantes.</div>
-          </div>
+            <div className="mt-3">
+              <label className="block font-medium">Stock</label>
+              <input
+                type="number"
+                name="stock"
+                className="border rounded w-full px-3 py-2"
+                value={form.stock}
+                onChange={handleChange}
+                required
+                min={0}
+              />
+              <div className="mt-1 text-xs text-white/60">
+                Obligatorio para vender este producto sin variantes.
+              </div>
+            </div>
           </div>
         )}
 
-        {/* Tipo */}
         <div>
-        <label className="block font-medium">Tipo</label>
-        <input
-          type="text"
-          name="tipo"
-          className="border rounded w-full px-3 py-2"
-          value={form.tipo}
-          onChange={handleChange}
-        />
-        <div className="mt-1 text-xs text-white/60">Opcional. Podés dejarlo vacío al crear un producto simple.</div>
+          <label className="block font-medium">Tipo</label>
+          <input
+            type="text"
+            name="tipo"
+            className="border rounded w-full px-3 py-2"
+            value={form.tipo}
+            onChange={handleChange}
+          />
+          <div className="mt-1 text-xs text-white/60">
+            Opcional. Puedes usarlo para clasificar internamente el producto.
+          </div>
         </div>
 
-        {/* Categoría */}
         <div>
-        <label className="block font-medium">Categoría</label>
-        <select
-          name="categoria_id"
-          value={form.categoria_id ?? ""}
-          onChange={handleChange}
-          className="border rounded w-full px-3 py-2"
-          disabled={loadingCategorias}
-        >
-          <option value="">
-            {loadingCategorias ? "Cargando..." : "Sin categoría"}
-          </option>
-
-          {categorias.map((cat) => (
-            <option key={cat.id} value={cat.id}>
-              {cat.nombre}
+          <label className="block font-medium">Categoria</label>
+          <select
+            name="categoria_id"
+            value={form.categoria_id ?? ""}
+            onChange={handleChange}
+            className="border rounded w-full px-3 py-2"
+            disabled={loadingCategorias}
+          >
+            <option value="">
+              {loadingCategorias ? "Cargando..." : "Sin categoria"}
             </option>
-          ))}
-        </select>
-        <div className="mt-1 text-xs text-white/60">Opcional. Si todavía no definiste una categoría, podés crear el producto igual.</div>
+
+            {categorias.map((cat) => (
+              <option key={cat.id} value={cat.id}>
+                {cat.nombre}
+              </option>
+            ))}
+          </select>
+          <div className="mt-1 text-xs text-white/60">
+            Opcional. Puedes asignarla ahora o hacerlo mas adelante.
+          </div>
         </div>
       </section>
 
@@ -1330,16 +1403,16 @@ const handleDraft = async () => {
          ============================ */}
       <details className="rounded-lg border border-white/10 bg-white/5 p-3">
         <summary className="cursor-pointer list-none text-sm font-medium text-white/90">
-          Opciones avanzadas: imágenes (opcionales al inicio)
+          Opciones avanzadas: imagenes
         </summary>
         <div className="mt-3">
         <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="font-medium text-white/90">Imágenes</div>
-            <div className="text-xs text-white/60">
-              Subí imágenes del producto y elegí cuál queda como principal.
+            <div>
+              <div className="font-medium text-white/90">Imágenes</div>
+              <div className="text-xs text-white/60">
+                Suma imagenes del producto y marca la principal para mostrar mejor la ficha.
+              </div>
             </div>
-          </div>
 
           <div className="flex gap-2">
             <button
@@ -1370,15 +1443,15 @@ const handleDraft = async () => {
 
         {!productoId && (
           <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
-            Guardá/creá el producto primero para poder subir imágenes.
+            Guarda el producto primero para poder subir imagenes.
           </div>
         )}
 
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {loadingImagenes ? (
-            <div className="text-white/70">Cargando imágenes...</div>
+            <div className="text-white/70">Cargando imagenes...</div>
           ) : imagenes.length === 0 ? (
-            <div className="text-white/70">No hay imágenes todavía.</div>
+            <div className="text-white/70">Todavia no cargaste imagenes.</div>
           ) : (
             imagenes.map((img) => (
               <div
@@ -1444,7 +1517,7 @@ const handleDraft = async () => {
             <div>
               <div className="font-medium text-white/90">Variantes</div>
               <div className="text-xs text-white/60">
-                Este producto usa variantes. El stock operativo se administra desde cada talle.
+                Este producto usa variantes. Aqui organizas stock y disponibilidad por talle.
               </div>
             </div>
 
@@ -1469,11 +1542,11 @@ const handleDraft = async () => {
             </div>
           </div>
 
-          {!productoId && (
-            <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
-              Guardá/creá el producto primero para poder agregar variantes.
-            </div>
-          )}
+        {!productoId && (
+          <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+            Guarda el producto primero para poder agregar variantes.
+          </div>
+        )}
 
           <div className="mt-3 overflow-x-auto">
             <table className="min-w-full border-separate border-spacing-y-2 text-sm">
@@ -1548,7 +1621,7 @@ const handleDraft = async () => {
                       {varEditingId ? "Editar variante" : "Nueva variante"}
                     </div>
                     <div className="text-xs text-white/60">
-                      El stock real vive en <b>producto_variante.stock</b>.
+                      Ajusta el talle y el stock disponible para esta opcion.
                     </div>
                   </div>
 

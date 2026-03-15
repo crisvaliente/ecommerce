@@ -52,6 +52,7 @@ const ProductosPage: React.FC = () => {
   const [productos, setProductos] = useState<ProductoUI[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [uiMessage, setUiMessage] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [filtro, setFiltro] = useState<FiltroEstado>("all");
 
@@ -59,6 +60,7 @@ const ProductosPage: React.FC = () => {
     try {
       setLoading(true);
       setErrorMsg(null);
+      setUiMessage(null);
 
       if (!dbUser?.empresa_id) {
         setProductos([]);
@@ -113,6 +115,11 @@ const ProductosPage: React.FC = () => {
       }));
 
       setProductos(ui);
+      setUiMessage(
+        ui.length > 0
+          ? "Listado actualizado correctamente."
+          : "No hay productos cargados por ahora."
+      );
     } catch (err) {
       console.error(err);
       setProductos([]);
@@ -131,9 +138,20 @@ const ProductosPage: React.FC = () => {
     return productos.filter((p) => p.estado === filtro);
   }, [productos, filtro]);
 
+  const resumen = useMemo(() => {
+    return {
+      all: productos.length,
+      published: productos.filter((p) => p.estado === "published").length,
+      draft: productos.filter((p) => p.estado === "draft").length,
+    };
+  }, [productos]);
+
   // Mutación permitida por ancla (deuda consciente TD-001)
   const handleDelete = async (id: string) => {
-    const ok = window.confirm("¿Seguro que querés eliminar este producto?");
+    const producto = productos.find((item) => item.id === id);
+    const ok = window.confirm(
+      `Vas a eliminar ${producto?.nombre ?? "este producto"}. Esta accion no se puede deshacer.`
+    );
     if (!ok) return;
 
     if (!dbUser?.empresa_id) {
@@ -158,6 +176,7 @@ const ProductosPage: React.FC = () => {
     }
 
     setProductos((prev) => prev.filter((p) => p.id !== id));
+    setUiMessage(`Producto eliminado: ${producto?.nombre ?? "sin nombre"}.`);
     setDeletingId(null);
   };
 
@@ -192,23 +211,22 @@ const ProductosPage: React.FC = () => {
         <div>
           <h1 className="text-2xl font-semibold">Productos</h1>
           <p className="text-sm text-slate-300">
-            Gestioná los productos de tu tienda.
+            Organizá el catalogo de tu tienda y revisa que este listo para publicar.
           </p>
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Filtro estado */}
           <select
             value={filtro}
             onChange={(e) => setFiltro(e.target.value as FiltroEstado)}
             className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200"
+            aria-label="Filtrar productos por estado"
           >
             <option value="all">Todos</option>
             <option value="published">Publicados</option>
             <option value="draft">Borradores</option>
           </select>
 
-          {/* Refresh (camino de lectura => endpoint) */}
           <button
             type="button"
             onClick={fetchProductos}
@@ -227,16 +245,69 @@ const ProductosPage: React.FC = () => {
         </div>
       </div>
 
+      <section className="mb-4 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium text-slate-100">Resumen del catalogo</p>
+            <p className="mt-1 text-xs text-slate-400">
+              Usa el filtro para revisar que esta publicado y que sigue en borrador.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-200">
+              Todos: {resumen.all}
+            </span>
+            <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-emerald-200">
+              Publicados: {resumen.published}
+            </span>
+            <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-amber-200">
+              Borradores: {resumen.draft}
+            </span>
+          </div>
+        </div>
+      </section>
+
       {loading && <p className="text-sm text-slate-300">Cargando productos…</p>}
 
-      {errorMsg && !loading && (
-        <p className="mb-3 text-sm text-rose-400">{errorMsg}</p>
+      {uiMessage && !loading && !errorMsg && (
+        <p className="mb-3 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
+          {uiMessage}
+        </p>
       )}
 
-      {!loading && !errorMsg && productosFiltrados.length === 0 && (
-        <p className="text-sm text-slate-400">
-          No hay productos para el filtro seleccionado.
+      {errorMsg && !loading && (
+        <p className="mb-3 rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
+          {errorMsg}
         </p>
+      )}
+
+      {!loading && !errorMsg && productos.length === 0 && (
+        <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-6 text-center">
+          <p className="text-base font-medium text-slate-100">
+            Todavia no tenes productos cargados.
+          </p>
+          <p className="mt-2 text-sm text-slate-400">
+            Crea tu primer producto para empezar a armar el catalogo de la tienda.
+          </p>
+          <Link
+            href="/panel/productos/nuevo"
+            className="mt-4 inline-flex rounded-lg bg-[#E30B13] px-4 py-2 text-sm font-medium text-white hover:bg-[#c70911]"
+          >
+            Crear primer producto
+          </Link>
+        </section>
+      )}
+
+      {!loading && !errorMsg && productos.length > 0 && productosFiltrados.length === 0 && (
+        <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-6 text-center">
+          <p className="text-base font-medium text-slate-100">
+            No hay productos para este filtro.
+          </p>
+          <p className="mt-2 text-sm text-slate-400">
+            Cambia el filtro para revisar el resto del catalogo.
+          </p>
+        </section>
       )}
 
       {!loading && productosFiltrados.length > 0 && (

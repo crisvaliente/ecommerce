@@ -11,6 +11,25 @@ interface AdminLayoutProps {
 
 const allowedRoles = ["admin", "desarrollador"];
 
+type InterstitialProps = {
+  title: string;
+  message: string;
+};
+
+const PanelInterstitial: React.FC<InterstitialProps> = ({ title, message }) => {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-[#EEECE1] px-6">
+      <div className="w-full max-w-md rounded-[28px] border border-stone-200 bg-white p-8 text-center shadow-sm">
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#E30B13]">
+          Raeyz Admin
+        </p>
+        <h1 className="mt-3 text-2xl font-semibold text-[#0D0D0E]">{title}</h1>
+        <p className="mt-3 text-sm leading-6 text-stone-600">{message}</p>
+      </div>
+    </div>
+  );
+};
+
 const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
   const { sessionUser, dbUser, loading } = useAuth();
   const router = useRouter();
@@ -36,14 +55,20 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center">
-        <p className="text-sm text-gray-700">Cargando panel…</p>
-      </div>
+      <PanelInterstitial
+        title="Cargando panel"
+        message="Estamos preparando tu espacio de trabajo. Esto tarda solo un momento."
+      />
     );
   }
 
   if (!sessionUser || !dbUser?.empresa_id) {
-    return null;
+    return (
+      <PanelInterstitial
+        title="Redirigiendo"
+        message="Estamos verificando tu acceso y llevandote a la pantalla correcta."
+      />
+    );
   }
 
   return (

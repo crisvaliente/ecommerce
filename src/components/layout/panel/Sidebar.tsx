@@ -47,6 +47,14 @@ const PanelSidebar: React.FC = () => {
     (link) => !link.allowedRoles || link.allowedRoles.includes(role)
   );
 
+  const isActiveLink = (href: string) => {
+    if (href === "/panel") {
+      return router.pathname === "/panel";
+    }
+
+    return router.pathname === href || router.pathname.startsWith(`${href}/`);
+  };
+
   return (
     <aside className="rz-sidebar">
       <div className="rz-sidebar-header">
@@ -56,7 +64,7 @@ const PanelSidebar: React.FC = () => {
 
       <nav className="rz-sidebar-nav">
         {visibleLinks.map((link) => {
-          const active = router.pathname.startsWith(link.href);
+          const active = isActiveLink(link.href);
 
           return (
             <Link
@@ -79,16 +87,14 @@ const PanelSidebar: React.FC = () => {
         )}
       </nav>
 
-<div className="rz-sidebar-footer">
-  {dbUser && (
-    <>
-      <div>
-        Usuario: {dbUser?.nombre || sessionUser?.email}
+      <div className="rz-sidebar-footer">
+        {dbUser && (
+          <>
+            <div>{dbUser?.nombre || sessionUser?.email}</div>
+            <div className="uppercase tracking-wide">{dbUser?.rol}</div>
+          </>
+        )}
       </div>
-      <div>Rol: {dbUser?.rol}</div>
-    </>
-  )}
-</div>
     </aside>
   );
 };

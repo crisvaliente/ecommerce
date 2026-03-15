@@ -43,6 +43,12 @@ type PageProps = {
   tenantSource: "default" | "query";
 };
 
+function formatStockLabel(stock: number): string {
+  if (stock <= 0) return "Sin stock";
+  if (stock === 1) return "1 unidad disponible";
+  return `${stock} unidades disponibles`;
+}
+
 async function resolveEmpresaId(rawEmpresaId: unknown): Promise<{
   empresaId: string | null;
   tenantSource: "default" | "query";
@@ -192,6 +198,8 @@ const ColeccionPage: React.FC<
     return Boolean(sessionUser && dbUser?.id && empresaId);
   }, [dbUser?.id, empresaId, sessionUser]);
 
+  const isRedirectingToCheckout = Boolean(intentoResult && !creatingFor);
+
   const getCheckoutErrorMessage = (code: string | null) => {
     switch (code) {
       case "direccion_envio_no_disponible":
@@ -324,7 +332,7 @@ const ColeccionPage: React.FC<
               </span>
               {tenantSource === "query" && (
                 <span className="rounded-full border border-amber-300/30 bg-amber-200/10 px-3 py-1 text-amber-100">
-                  Modo prueba por query
+                  Vista temporal de prueba
                 </span>
               )}
             </div>
@@ -333,15 +341,21 @@ const ColeccionPage: React.FC<
 
         <section className="mt-6 rounded-[28px] border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
           {!empresaId && error === "storefront_tenant_not_found" && (
-            <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              No pudimos cargar la tienda de {STOREFRONT_TENANT.name} en este entorno.
-            </p>
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
+              <p className="font-medium">La tienda no esta disponible ahora.</p>
+              <p className="mt-1 text-amber-800">
+                Probá nuevamente en unos minutos.
+              </p>
+            </div>
           )}
 
           {empresaId && error === "product_read_failed" && (
-            <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
-              No pudimos cargar los productos disponibles ahora.
-            </p>
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-900">
+              <p className="font-medium">No pudimos cargar la coleccion ahora.</p>
+              <p className="mt-1 text-rose-800">
+                Actualiza la pagina o volve a intentar en unos minutos.
+              </p>
+            </div>
           )}
 
           {empresaId && !error && (
@@ -350,11 +364,11 @@ const ColeccionPage: React.FC<
                 <p className="text-sm font-medium text-stone-900">
                   {canCreatePedido
                     ? `Comprando como ${dbUser?.correo ?? "tu cuenta"}`
-                    : "Inicia sesion para continuar con la compra"}
+                    : "Inicia sesion para comprar de forma segura"}
                 </p>
                 <p className="mt-1 text-sm text-stone-600">
                   {canCreatePedido
-                    ? "Al continuar, armamos tu pedido y abrimos el checkout automaticamente."
+                    ? "Armamos tu pedido y te llevamos directo a Mercado Pago para completar el pago."
                     : "Necesitas una cuenta con una direccion guardada para avanzar al checkout."}
                 </p>
               </div>
@@ -370,15 +384,24 @@ const ColeccionPage: React.FC<
             </div>
           )}
 
+          {creatingFor && (
+            <div className="mt-4 rounded-2xl border border-stone-200 bg-[#EEECE1] px-4 py-4 text-sm text-stone-900">
+              <p className="font-medium">Estamos preparando tu compra.</p>
+              <p className="mt-1 text-stone-700">
+                En unos segundos te redirigimos a Mercado Pago para completar el pago.
+              </p>
+            </div>
+          )}
+
           {checkoutError && (
             <p className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
               {checkoutError}
             </p>
           )}
 
-          {intentoResult && (
+          {isRedirectingToCheckout && (
             <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-              Estamos abriendo el checkout. Si no se abre automaticamente, usa este{" "}
+              Tu pago ya esta listo. Si Mercado Pago no se abre automaticamente, usa este{" "}
               <a
                 href={intentoResult.init_point}
                 target="_blank"
@@ -393,9 +416,14 @@ const ColeccionPage: React.FC<
         </section>
 
         {empresaId && !error && productos.length === 0 && (
-          <p className="mt-6 text-sm text-stone-600">
-            No hay productos disponibles para compra en este momento.
-          </p>
+          <section className="mt-6 rounded-[28px] border border-stone-200 bg-white p-6 text-center shadow-sm">
+            <p className="text-base font-medium text-stone-900">
+              No hay productos disponibles ahora.
+            </p>
+            <p className="mt-2 text-sm text-stone-600">
+              Estamos actualizando la coleccion. Volve a revisar mas tarde.
+            </p>
+          </section>
         )}
 
         {productos.length > 0 && (
@@ -409,8 +437,15 @@ const ColeccionPage: React.FC<
                   <h2 className="text-xl font-semibold text-stone-900">
                     {producto.nombre}
                   </h2>
-                  <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-900">
-                    Disponible
+                  <span
+                    className={
+                      "rounded-full px-2.5 py-1 text-xs font-medium " +
+                      (producto.stock_efectivo > 0
+                        ? "bg-emerald-100 text-emerald-900"
+                        : "bg-stone-200 text-stone-700")
+                    }
+                  >
+                    {producto.stock_efectivo > 0 ? "Disponible" : "Sin stock"}
                   </span>
                 </div>
 
@@ -432,33 +467,43 @@ const ColeccionPage: React.FC<
                   </div>
                   <div className="flex justify-between gap-3">
                     <dt>Disponibilidad</dt>
-                    <dd>
-                      {producto.stock_efectivo > 0
-                        ? `${producto.stock_efectivo} unidades`
-                        : "Sin stock"}
-                    </dd>
+                    <dd>{formatStockLabel(producto.stock_efectivo)}</dd>
                   </div>
                 </dl>
 
                 <div className="mt-4">
-                  <button
-                    type="button"
-                    onClick={() => handleComprar(producto)}
-                    disabled={
-                      !canCreatePedido ||
-                      producto.stock_efectivo <= 0 ||
-                      creatingFor === producto.producto_id
-                    }
-                    className="w-full rounded-full bg-stone-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:bg-stone-300"
-                  >
-                    {creatingFor === producto.producto_id
-                      ? "Preparando checkout..."
-                      : "Comprar ahora"}
-                  </button>
+                  {canCreatePedido ? (
+                    <button
+                      type="button"
+                      onClick={() => handleComprar(producto)}
+                      disabled={
+                        producto.stock_efectivo <= 0 ||
+                        creatingFor === producto.producto_id
+                      }
+                      className="w-full rounded-full bg-stone-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:bg-stone-300"
+                    >
+                      {creatingFor === producto.producto_id
+                        ? "Preparando tu pago..."
+                        : "Comprar ahora"}
+                    </button>
+                  ) : (
+                    <Link
+                      href="/auth/login"
+                      className="block w-full rounded-full bg-[#E30B13] px-4 py-3 text-center text-sm font-medium text-white transition hover:bg-[#c70911]"
+                    >
+                      Iniciar sesion para comprar
+                    </Link>
+                  )}
 
                   {producto.stock_efectivo <= 0 && (
                     <p className="mt-2 text-xs text-rose-700">
-                      Este producto no tiene stock disponible ahora.
+                      Este producto volvera a estar disponible cuando repongamos stock.
+                    </p>
+                  )}
+
+                  {canCreatePedido && producto.stock_efectivo > 0 && (
+                    <p className="mt-2 text-xs text-stone-500">
+                      Vas a completar el pago en Mercado Pago, sin pasos intermedios.
                     </p>
                   )}
                 </div>

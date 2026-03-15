@@ -104,6 +104,57 @@ function renderSnapshot(snapshot: unknown): string {
   return parts.length > 0 ? parts.join(", ") : "Sin snapshot disponible";
 }
 
+function getPedidoBanner(pedido: PedidoDetail): {
+  title: string;
+  message: string;
+  className: string;
+} {
+  if (pedido.bloqueado_por_stock || pedido.estado === "bloqueado") {
+    return {
+      title: "Pedido bloqueado",
+      message: "Este pedido necesita revision antes de seguir avanzando.",
+      className: "border-amber-200 bg-amber-50 text-amber-900",
+    };
+  }
+
+  if (pedido.estado === "pendiente_pago") {
+    return {
+      title: "Esperando pago",
+      message: "El pedido ya fue creado y esta a la espera de que el comprador complete el pago.",
+      className: "border-blue-200 bg-blue-50 text-blue-900",
+    };
+  }
+
+  if (pedido.estado === "pagado") {
+    return {
+      title: "Pago confirmado",
+      message: "El pedido ya figura como pagado y puede seguir su curso operativo.",
+      className: "border-emerald-200 bg-emerald-50 text-emerald-900",
+    };
+  }
+
+  return {
+    title: "Pedido actualizado",
+    message: "Este pedido ya tiene actividad registrada y puede seguir gestionandose desde el panel.",
+    className: "border-stone-200 bg-stone-50 text-stone-900",
+  };
+}
+
+function getIntentoStatusTone(intento: IntentoPago | null): string {
+  if (!intento) return "text-stone-500";
+
+  switch (intento.estado) {
+    case "aprobado":
+      return "text-emerald-300";
+    case "rechazado":
+    case "cancelado":
+    case "expirado":
+      return "text-rose-300";
+    default:
+      return "text-amber-300";
+  }
+}
+
 const PanelPedidoDetailPage: React.FC = () => {
   const router = useRouter();
   const pedidoId =
@@ -112,6 +163,7 @@ const PanelPedidoDetailPage: React.FC = () => {
   const [pedido, setPedido] = useState<PedidoDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const pedidoBanner = pedido ? getPedidoBanner(pedido) : null;
 
   const fetchPedido = useCallback(async () => {
     if (!pedidoId) return;
@@ -185,9 +237,11 @@ const PanelPedidoDetailPage: React.FC = () => {
           >
             Volver a pedidos
           </Link>
-          <h1 className="mt-2 text-2xl font-semibold">Detalle del pedido</h1>
+          <h1 className="mt-2 text-2xl font-semibold">Pedido</h1>
           {pedidoId && (
-            <p className="mt-1 font-mono text-xs text-slate-400">{pedidoId}</p>
+            <p className="mt-1 text-sm text-slate-400">
+              Seguimiento completo del pedido y su estado de cobro.
+            </p>
           )}
         </div>
 
@@ -209,6 +263,13 @@ const PanelPedidoDetailPage: React.FC = () => {
 
       {!loading && pedido && (
         <div className="space-y-6">
+          {pedidoBanner && (
+            <section className={`rounded-xl border p-4 ${pedidoBanner.className}`}>
+              <p className="text-sm font-semibold">{pedidoBanner.title}</p>
+              <p className="mt-1 text-sm opacity-90">{pedidoBanner.message}</p>
+            </section>
+          )}
+
           <section className="grid grid-cols-1 gap-4 rounded-xl border border-slate-800 bg-slate-950/40 p-4 md:grid-cols-2 xl:grid-cols-3">
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-500">Estado</p>
@@ -228,9 +289,9 @@ const PanelPedidoDetailPage: React.FC = () => {
             </div>
 
             <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500">Bloqueado por stock</p>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Revision de stock</p>
               <p className="mt-1 text-sm text-slate-100">
-                {pedido.bloqueado_por_stock ? "Sí" : "No"}
+                {pedido.bloqueado_por_stock ? "Requiere atencion" : "Sin observaciones"}
               </p>
             </div>
 
@@ -251,7 +312,7 @@ const PanelPedidoDetailPage: React.FC = () => {
           </section>
 
           <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
-            <h2 className="text-lg font-medium text-slate-100">Dirección snapshot</h2>
+            <h2 className="text-lg font-medium text-slate-100">Entrega</h2>
             <p className="mt-3 text-sm text-slate-300">
               {renderSnapshot(pedido.direccion_envio_snapshot)}
             </p>
@@ -259,46 +320,64 @@ const PanelPedidoDetailPage: React.FC = () => {
 
           <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <h2 className="text-lg font-medium text-slate-100">Intento de pago</h2>
+              <h2 className="text-lg font-medium text-slate-100">Cobro</h2>
             </div>
 
             {!pedido.intento_pago ? (
-              <p className="text-sm text-slate-400">No hay intento de pago asociado.</p>
+              <p className="text-sm text-slate-400">
+                Todavia no hay un intento de pago asociado a este pedido.
+              </p>
             ) : (
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-slate-500">ID</p>
-                  <p className="mt-1 break-all font-mono text-xs text-slate-100">
-                    {pedido.intento_pago.id}
-                  </p>
+              <div className="space-y-5">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-slate-500">
+                      Estado del cobro
+                    </p>
+                    <p className={`mt-1 text-sm font-medium ${getIntentoStatusTone(pedido.intento_pago)}`}>
+                      {intentoEstadoLabel[pedido.intento_pago.estado] ?? pedido.intento_pago.estado}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-slate-500">Canal</p>
+                    <p className="mt-1 text-sm text-slate-100">{pedido.intento_pago.canal_pago}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-slate-500">Creado</p>
+                    <p className="mt-1 text-sm text-slate-100">
+                      {formatDate(pedido.intento_pago.creado_en)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-slate-500">Actualizado</p>
+                    <p className="mt-1 text-sm text-slate-100">
+                      {formatDate(pedido.intento_pago.actualizado_en)}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-slate-500">Estado</p>
-                  <p className="mt-1 text-sm text-slate-100">
-                    {intentoEstadoLabel[pedido.intento_pago.estado] ?? pedido.intento_pago.estado}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-slate-500">Canal</p>
-                  <p className="mt-1 text-sm text-slate-100">{pedido.intento_pago.canal_pago}</p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-slate-500">Preference ID</p>
-                  <p className="mt-1 break-all font-mono text-xs text-slate-100">
-                    {pedido.intento_pago.preference_id ?? "-"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-slate-500">External ID</p>
-                  <p className="mt-1 break-all font-mono text-xs text-slate-100">
-                    {pedido.intento_pago.external_id ?? "-"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-slate-500">Actualizado</p>
-                  <p className="mt-1 text-sm text-slate-100">
-                    {formatDate(pedido.intento_pago.actualizado_en)}
-                  </p>
+
+                <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+                  <h3 className="text-sm font-medium text-slate-100">Datos tecnicos</h3>
+                  <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-slate-500">Intento ID</p>
+                      <p className="mt-1 break-all font-mono text-xs text-slate-100">
+                        {pedido.intento_pago.id}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-slate-500">Preference ID</p>
+                      <p className="mt-1 break-all font-mono text-xs text-slate-100">
+                        {pedido.intento_pago.preference_id ?? "-"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-slate-500">External ID</p>
+                      <p className="mt-1 break-all font-mono text-xs text-slate-100">
+                        {pedido.intento_pago.external_id ?? "-"}
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
