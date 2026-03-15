@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import type { GetServerSideProps, InferGetServerSidePropsType } from "next";
 import { useAuth } from "../../context/AuthContext";
 import { supabaseServer } from "../../lib/supabaseServer";
+import { supabase } from "../../lib/supabaseClient";
 
 type ProductoEstado = "draft" | "published";
 
@@ -118,6 +119,16 @@ const ColeccionPage: React.FC<
     producto_id: string;
   } | null>(null);
   const [pedidoError, setPedidoError] = useState<string | null>(null);
+  const [pedidoIdParaPago, setPedidoIdParaPago] = useState("");
+  const [creatingIntento, setCreatingIntento] = useState(false);
+  const [intentoError, setIntentoError] = useState<string | null>(null);
+  const [intentoResult, setIntentoResult] = useState<{
+    id: string;
+    pedido_id: string;
+    estado: string;
+    preference_id: string;
+    init_point: string;
+  } | null>(null);
 
   const canCreatePedido = useMemo(() => {
     return Boolean(sessionUser && dbUser?.id && dbUser?.empresa_id && empresaId);
@@ -175,11 +186,75 @@ const ColeccionPage: React.FC<
         pedido_id: body.pedido_id,
         producto_id: producto.producto_id,
       });
+      setPedidoIdParaPago(body.pedido_id);
     } catch (err) {
       console.error(err);
       setPedidoError("unexpected_error");
     } finally {
       setCreatingFor(null);
+    }
+  };
+
+  const handleCrearIntentoPago = async () => {
+    const pedidoId = pedidoIdParaPago.trim();
+
+    if (!pedidoId) {
+      setIntentoError("Ingresá un pedido_id válido antes de crear el intento de pago.");
+      return;
+    }
+
+    setCreatingIntento(true);
+    setIntentoError(null);
+    setIntentoResult(null);
+
+    try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      const accessToken = session?.access_token ?? null;
+
+      if (sessionError || !accessToken) {
+        setIntentoError("Necesitás iniciar sesión para crear el intento de pago.");
+        return;
+      }
+
+      const response = await fetch("/api/ecommerce/intento-pago", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          pedido_id: pedidoId,
+        }),
+      });
+
+      const body = (await response.json().catch(() => null)) as
+        | {
+            intento_pago?: {
+              id: string;
+              pedido_id: string;
+              estado: string;
+              preference_id: string;
+              init_point: string;
+            };
+            error?: string;
+          }
+        | null;
+
+      if (!response.ok || !body?.intento_pago) {
+        setIntentoError(body?.error ?? "intento_pago_creation_failed");
+        return;
+      }
+
+      setIntentoResult(body.intento_pago);
+    } catch (err) {
+      console.error(err);
+      setIntentoError("unexpected_error");
+    } finally {
+      setCreatingIntento(false);
     }
   };
 
@@ -244,6 +319,67 @@ const ColeccionPage: React.FC<
               Pedido creado: <code>{pedidoResult.pedido_id}</code> para producto{" "}
               <code>{pedidoResult.producto_id}</code>
             </p>
+          )}
+        </section>
+      )}
+
+      {empresaId && !error && (
+        <section className="mb-6 rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <h2 className="text-lg font-semibold text-slate-900">
+            Crear intento de pago de validación
+          </h2>
+          <p className="mt-1 text-sm text-slate-600">
+            Camino mínimo: usar un pedido pendiente existente y abrir el bridge de Mercado Pago.
+          </p>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+            <label className="block text-sm text-slate-700">
+              <span className="mb-1 block font-medium">pedido_id</span>
+              <input
+                type="text"
+                value={pedidoIdParaPago}
+                onChange={(e) => setPedidoIdParaPago(e.target.value)}
+                className="w-full rounded border border-slate-300 px-3 py-2 font-mono text-sm"
+                placeholder="uuid de public.pedido"
+              />
+            </label>
+
+            <button
+              type="button"
+              onClick={handleCrearIntentoPago}
+              disabled={creatingIntento || !pedidoIdParaPago.trim()}
+              className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              {creatingIntento ? "Creando intento..." : "Crear intento de pago"}
+            </button>
+          </div>
+
+          {intentoError && (
+            <p className="mt-3 text-sm text-rose-700">Error: {intentoError}</p>
+          )}
+
+          {intentoResult && (
+            <div className="mt-3 space-y-2 text-sm text-emerald-700">
+              <p>
+                Intento creado: <code>{intentoResult.id}</code>
+              </p>
+              <p>
+                Preference: <code>{intentoResult.preference_id}</code>
+              </p>
+              <p>
+                Estado: <code>{intentoResult.estado}</code>
+              </p>
+              <p>
+                <a
+                  href={intentoResult.init_point}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium underline"
+                >
+                  Abrir Checkout Pro
+                </a>
+              </p>
+            </div>
           )}
         </section>
       )}
