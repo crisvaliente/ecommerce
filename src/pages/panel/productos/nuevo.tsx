@@ -35,7 +35,7 @@ const NuevoProductoPage: React.FC = () => {
       )}
 
       {/* El ProductForm se encarga de todo: estado, validaciones básicas y upsert */}
-      <div className="max-w-lg rounded-xl border border-slate-800 bg-slate-950/40">
+      <div className="max-w-3xl rounded-xl border border-slate-800 bg-slate-950/40">
         <ProductForm />
       </div>
     </AdminLayout>

@@ -47,7 +47,7 @@ const EditarProductoPage: React.FC = () => {
 
       {/* ProductForm se encarga de cargar el producto, manejar estado y guardar */}
       {hasEmpresa && (
-        <div className="max-w-lg rounded-xl border border-slate-800 bg-slate-950/40">
+        <div className="max-w-3xl rounded-xl border border-slate-800 bg-slate-950/40">
           <ProductForm productoId={id} />
         </div>
       )}

@@ -107,8 +107,8 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   const [saving, setSaving] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
 
-const [saveOk, setSaveOk] = useState(false);
-const [saveErr, setSaveErr] = useState<string | null>(null);
+  const [saveErr, setSaveErr] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
   const [loadingProducto, setLoadingProducto] = useState(!!productoId);
 
@@ -375,7 +375,7 @@ const handleDeleteImagen = async (img: ImagenProductoUI) => {
     // 4) Storage best-effort (no bloquea DB)
     try {
       await deleteProductoImagen(rawPath);
-    } catch (storageErr: any) {
+    } catch (storageErr: unknown) {
       console.warn(
         "[delete-image] storage delete best-effort falló:",
         storageErr
@@ -384,9 +384,11 @@ const handleDeleteImagen = async (img: ImagenProductoUI) => {
 
     // 5) Consistencia final (DB manda)
     await fetchImagenes();
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error("[handleDeleteImagen] catch:", e);
-    alert(typeof e === "string" ? e : JSON.stringify(e, null, 2));
+    const message =
+      e instanceof Error ? e.message : typeof e === "string" ? e : "Error eliminando imagen.";
+    alert(message);
   }
 };
 
@@ -460,7 +462,7 @@ const handleUploadImagen = async (file: File) => {
     if (selErr) throw new Error(selErr.message);
 
     const yaHayPrincipalActiva = (existentes ?? []).some(
-      (x: any) => x.es_principal === true
+      (x: { es_principal?: boolean }) => x.es_principal === true
     );
     const shouldBePrincipal = !yaHayPrincipalActiva;
 
@@ -498,20 +500,24 @@ const handleUploadImagen = async (file: File) => {
     if (shouldBePrincipal) {
       await setPrincipalImagen(inserted.id);
     }
-  } catch (e: any) {
-    console.error("[B2] ERROR:", e?.message ?? e);
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : "Error subiendo imagen.";
+    console.error("[B2] ERROR:", message);
 
     // compensación best-effort si DB falló o algo rompió después del upload
     if (storagePath) {
       try {
         await deleteProductoImagen(storagePath);
         console.log("[B2] compensación OK:", storagePath);
-      } catch (delErr: any) {
-        console.warn("[B2] compensación FALLÓ:", delErr?.message ?? delErr);
+      } catch (delErr: unknown) {
+        console.warn(
+          "[B2] compensación FALLÓ:",
+          delErr instanceof Error ? delErr.message : delErr
+        );
       }
     }
 
-    alert(e?.message ?? "Error subiendo imagen.");
+    alert(message);
   } finally {
     setUploadingImagen(false);
   }
@@ -649,13 +655,19 @@ const handleUploadImagen = async (file: File) => {
   // ============================
   const saveProducto = async (overrideEstado?: ProductoEstado) => {
     if (!empresaId) {
-      alert("No se encontró empresa asociada al usuario.");
-      return { ok: false as const, id: null as string | null };
+      throw new Error("No se encontró una empresa asociada al usuario.");
     }
 
     if (!form.nombre.trim()) {
-      alert("El nombre es obligatorio.");
-      return { ok: false as const, id: null as string | null };
+      throw new Error("El nombre es obligatorio.");
+    }
+
+    if (!Number.isFinite(Number(form.precio)) || Number(form.precio) <= 0) {
+      throw new Error("Ingresá un precio válido mayor a 0.");
+    }
+
+    if (!usaVariantes && (!Number.isFinite(Number(form.stock)) || Number(form.stock) < 0)) {
+      throw new Error("Ingresá un stock válido igual o mayor a 0.");
     }
 
     const estadoToSave = overrideEstado ?? form.estado;
@@ -716,8 +728,7 @@ if (productoId) {
 
     if (error || !data) {
       console.error("Error creando producto:", error);
-      alert("Error creando producto.");
-      return { ok: false as const, id: null as string | null };
+      throw new Error(error?.message || "Error creando producto.");
     }
 
     setForm((p) => ({ ...p, estado: toProductoEstado(data.estado) }));
@@ -749,23 +760,22 @@ const handleSubmit = async (e: React.FormEvent) => {
   e.preventDefault();
 
   setSaving(true);
-  setSaveOk(false);
   setSaveErr(null);
+  setSaveMessage(null);
 
   try {
     const res = await saveProducto();
-    if (!res.ok) return;
 
-    setSaveOk(true);
+    setSaveMessage(productoId ? "Cambios guardados correctamente." : "Producto creado correctamente.");
 
     if (!productoId && res.id) {
       await maybeSetUsaVariantesAfterCreate(res.id);
       router.replace(`/panel/productos/${res.id}`);
       return;
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("[handleSubmit] error:", err);
-    setSaveErr(err?.message ?? "Error guardando producto.");
+    setSaveErr(err instanceof Error ? err.message : "Error guardando producto.");
   } finally {
     setSaving(false);
   }
@@ -778,23 +788,26 @@ const handlePublish = async () => {
   if (transitioning || saving) return;
 
   setTransitioning(true);
-  setSaveOk(false);
   setSaveErr(null);
+  setSaveMessage(null);
 
   try {
     const res = await saveProducto("published");
-    if (!res.ok) return;
 
-    setSaveOk(true);
+    setSaveMessage(
+      productoId
+        ? "Producto publicado correctamente."
+        : "Producto creado y publicado correctamente."
+    );
 
     if (!productoId && res.id) {
       await maybeSetUsaVariantesAfterCreate(res.id);
       router.replace(`/panel/productos/${res.id}`);
       return;
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("[handlePublish] error:", err);
-    setSaveErr(err?.message ?? "Error publicando.");
+    setSaveErr(err instanceof Error ? err.message : "Error publicando.");
   } finally {
     setTransitioning(false);
   }
@@ -809,17 +822,16 @@ const handleDraft = async () => {
   if (transitioning || saving) return;
 
   setTransitioning(true);
-  setSaveOk(false);
   setSaveErr(null);
+  setSaveMessage(null);
 
   try {
-    const res = await saveProducto("draft");
-    if (!res.ok) return;
+    await saveProducto("draft");
 
-    setSaveOk(true);
-  } catch (err: any) {
+    setSaveMessage("Producto guardado como borrador.");
+  } catch (err: unknown) {
     console.error("[handleDraft] error:", err);
-    setSaveErr(err?.message ?? "Error pasando a borrador.");
+    setSaveErr(err instanceof Error ? err.message : "Error pasando a borrador.");
   } finally {
     setTransitioning(false);
   }
@@ -1066,6 +1078,18 @@ const handleDraft = async () => {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5 p-4">
+      {(saveErr || saveMessage) && (
+        <div
+          className={`rounded-lg border px-3 py-2 text-sm ${
+            saveErr
+              ? "border-red-500/30 bg-red-500/10 text-red-100"
+              : "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
+          }`}
+        >
+          {saveErr ? `Error: ${saveErr}` : saveMessage}
+        </div>
+      )}
+
       {/* Header estado */}
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -1089,24 +1113,28 @@ const handleDraft = async () => {
           {/* Resumen stock */}
           <div className="mt-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="font-medium text-white/90">Stock total:</span>
+              <span className="font-medium text-white/90">Stock visible hoy:</span>
               <span className="font-semibold text-white">
                 {typeof stockTotal === "number" ? stockTotal : "—"}
               </span>
               {usaVariantes ? (
-                <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-100">
+                  <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-100">
                   calculado por variantes
-                </span>
+                  </span>
               ) : (
                 <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-xs text-white/70">
-                  stock simple (legacy)
+                  stock simple
                 </span>
               )}
             </div>
 
-            {usaVariantes && (
+            {usaVariantes ? (
               <div className="mt-1 text-xs text-white/60">
-                Nota: en Camino A el stock total suma existencias aunque la variante esté inactiva.
+                El stock se controla desde variantes. En este formulario ya no editás stock directo.
+              </div>
+            ) : (
+              <div className="mt-1 text-xs text-white/60">
+                En este producto simple, el campo Stock de abajo es el stock operativo que estás editando.
               </div>
             )}
           </div>
@@ -1136,9 +1164,18 @@ const handleDraft = async () => {
         </div>
       </div>
 
-      {/* ✅ Capa 2 (solo /nuevo): opción "Crear en modo variantes" */}
-      {!productoId && (
-        <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+      {/* Datos principales */}
+      <section className="space-y-5 rounded-lg border border-white/10 bg-white/5 p-4">
+        <div>
+          <h2 className="text-base font-semibold text-white">Datos principales</h2>
+          <p className="mt-1 text-sm text-white/60">
+            Completá este bloque para crear o editar un producto simple.
+          </p>
+        </div>
+
+        {/* ✅ Capa 2 (solo /nuevo): opción "Crear en modo variantes" */}
+        {!productoId && (
+          <div className="rounded-lg border border-white/10 bg-black/10 p-3">
           <label className="flex items-start gap-3 text-sm text-white/90">
             <input
               type="checkbox"
@@ -1153,11 +1190,11 @@ const handleDraft = async () => {
               </span>
             </span>
           </label>
-        </div>
-      )}
+          </div>
+        )}
 
-      {/* Nombre */}
-      <div>
+        {/* Nombre */}
+        <div>
         <label className="block font-medium">Nombre</label>
         <input
           type="text"
@@ -1167,10 +1204,10 @@ const handleDraft = async () => {
           onChange={handleChange}
           required
         />
-      </div>
+        </div>
 
-      {/* Descripción */}
-      <div>
+        {/* Descripción */}
+        <div>
         <label className="block font-medium">Descripción</label>
         <textarea
           name="descripcion"
@@ -1178,10 +1215,10 @@ const handleDraft = async () => {
           value={form.descripcion}
           onChange={handleChange}
         />
-      </div>
+        </div>
 
-      {/* Precio */}
-      <div>
+        {/* Precio */}
+        <div>
         <label className="block font-medium">Precio</label>
         <input
           type="number"
@@ -1191,16 +1228,16 @@ const handleDraft = async () => {
           onChange={handleChange}
           required
         />
-      </div>
+        </div>
 
-      {/* Stock legacy (solo si NO usa variantes) */}
-      {showStockLegacyInput && (
-        <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+        {/* Stock legacy (solo si NO usa variantes) */}
+        {showStockLegacyInput && (
+          <div className="rounded-lg border border-white/10 bg-black/10 p-3">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="font-medium text-white/90">Modo legacy</div>
+              <div className="font-medium text-white/90">Stock simple</div>
               <div className="text-xs text-white/60">
-                El stock simple aplica solo mientras <b>usa_variantes</b> sea false.
+                Este es el stock que se usa en la operación normal mientras el producto no trabaje con variantes.
               </div>
             </div>
 
@@ -1228,11 +1265,11 @@ const handleDraft = async () => {
             />
             <div className="mt-1 text-xs text-white/60">Stock simple (legacy).</div>
           </div>
-        </div>
-      )}
+          </div>
+        )}
 
-      {/* Tipo */}
-      <div>
+        {/* Tipo */}
+        <div>
         <label className="block font-medium">Tipo</label>
         <input
           type="text"
@@ -1241,10 +1278,10 @@ const handleDraft = async () => {
           value={form.tipo}
           onChange={handleChange}
         />
-      </div>
+        </div>
 
-      {/* Categoría */}
-      <div>
+        {/* Categoría */}
+        <div>
         <label className="block font-medium">Categoría</label>
         <select
           name="categoria_id"
@@ -1263,17 +1300,22 @@ const handleDraft = async () => {
             </option>
           ))}
         </select>
-      </div>
+        </div>
+      </section>
 
       {/* ============================
           Imágenes (B1.5)
          ============================ */}
-      <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+      <details className="rounded-lg border border-white/10 bg-white/5 p-3">
+        <summary className="cursor-pointer list-none text-sm font-medium text-white/90">
+          Opciones avanzadas: imágenes
+        </summary>
+        <div className="mt-3">
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="font-medium text-white/90">Imágenes</div>
             <div className="text-xs text-white/60">
-              Bucket privado. Guardamos el <b>path</b> en <b>url_imagen</b> (legacy) y en <b>path</b> (canonical).
+              Subí imágenes del producto y elegí cuál queda como principal.
             </div>
           </div>
 
@@ -1367,18 +1409,23 @@ const handleDraft = async () => {
             ))
           )}
         </div>
-      </div>
+        </div>
+      </details>
 
       {/* ============================
           Variantes block (solo si usa_variantes)
          ============================ */}
       {usaVariantes && (
-        <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+        <details className="rounded-lg border border-white/10 bg-white/5 p-3" open>
+          <summary className="cursor-pointer list-none text-sm font-medium text-white/90">
+            Opciones avanzadas: variantes y stock por talle
+          </summary>
+          <div className="mt-3">
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="font-medium text-white/90">Variantes</div>
               <div className="text-xs text-white/60">
-                Gestioná stock real por talle/variante. (Camino A: stock total ignora activo)
+                Este producto usa variantes. El stock operativo se administra desde cada talle.
               </div>
             </div>
 
@@ -1563,29 +1610,18 @@ const handleDraft = async () => {
               </div>
             </div>
           )}
-        </div>
+          </div>
+        </details>
       )}
 
       {/* Guardar */}
-<button
-  type="submit"
-  disabled={saving || transitioning}
-  className="px-4 py-2 bg-black text-white rounded hover:bg-neutral-800 disabled:opacity-60"
->
-  {saving ? "Guardando..." : productoId ? "Guardar cambios" : "Crear producto"}
-</button>
-
-{saveErr && (
-  <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-100">
-    Error: {saveErr}
-  </div>
-)}
-
-{saveOk && !saveErr && (
-  <div className="mt-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
-    Guardado ✅
-  </div>
-)}
+      <button
+        type="submit"
+        disabled={saving || transitioning}
+        className="px-4 py-2 bg-black text-white rounded hover:bg-neutral-800 disabled:opacity-60"
+      >
+        {saving ? "Guardando..." : productoId ? "Guardar cambios" : "Crear producto"}
+      </button>
     </form>
   );
 };
