@@ -215,6 +215,8 @@ export default async function handler(
     ? (rpcData[0] as RpcRow | undefined)
     : (rpcData as RpcRow | null);
 
+  console.log("[intento-pago] rpc row", row);
+
   if (!row) {
     return res.status(500).json({ error: "unexpected_error" });
   }
@@ -237,6 +239,11 @@ export default async function handler(
     .eq("id", row.pedido_id)
     .single();
 
+  console.log("[intento-pago] pedidoRow", {
+    pedidoError,
+    pedidoRow,
+  });
+
   const pedido = pedidoRow as PedidoRow | null;
   const total = toAmount(pedido?.total ?? null);
 
@@ -256,13 +263,28 @@ export default async function handler(
       total,
       notificationUrl,
     });
+    console.log("[intento-pago] mp response", {
+      ok: true,
+      body: preference,
+    });
   } catch {
+    console.error("[intento-pago] mp response", {
+      ok: false,
+      body: null,
+    });
     // El intento interno ya existe y queda en "iniciado".
     // En v1 no compensamos: permitimos reintentar la apertura del bridge.
     return res.status(502).json({ error: "mercadopago_preference_error" });
   }
 
   const initPoint = preference.init_point ?? preference.sandbox_init_point ?? null;
+
+  console.log("[intento-pago] mp parsed", {
+    id: preference.id,
+    init_point: preference.init_point,
+    sandbox_init_point: preference.sandbox_init_point ?? null,
+    resolved_init_point: initPoint,
+  });
 
   if (!preference.id || !initPoint) {
     return res.status(502).json({ error: "mercadopago_preference_error" });
@@ -274,6 +296,12 @@ export default async function handler(
       preference_id: preference.id,
     })
     .eq("id", row.intento_pago_id);
+
+  console.log("[intento-pago] update intento_pago", {
+    intento_pago_id: row.intento_pago_id,
+    preference_id: preference.id,
+    updateError,
+  });
 
   if (updateError) {
     return res.status(500).json({ error: "unexpected_error" });
