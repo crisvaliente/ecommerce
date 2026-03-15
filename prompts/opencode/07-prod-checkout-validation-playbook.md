@@ -1,4 +1,7 @@
-# ROLE
+# Production Checkout Validation Playbook
+
+## Role
+
 You are acting as a **technical auditor and operations planner** for this ecommerce system.
 
 Your task is NOT to modify the codebase.
@@ -7,7 +10,7 @@ Your task is to produce a **human-executable production validation playbook** fo
 
 The plan will be reviewed and approved by the project architect before any execution happens.
 
-# CONTEXT
+## Context
 
 This project is an ecommerce SaaS built with:
 
@@ -45,7 +48,7 @@ The system is already deployed.
 
 Goal now is to validate the checkout system using **real production infrastructure**.
 
-# OBJECTIVE
+## Objective
 
 Produce a **practical step-by-step execution plan** for validating the checkout flow in production.
 
@@ -61,7 +64,7 @@ Do NOT suggest large testing frameworks.
 
 Only design the **execution sequence**.
 
-# AUDIT RULES
+## Instructions
 
 - Base the plan on the **actual repository**.
 - Only mention endpoints, RPCs, tables, fields, states, and flows that can be inferred from the codebase.
@@ -74,7 +77,7 @@ Only design the **execution sequence**.
 - Treat **webhook receipt** and **order consolidation** as separate validation checkpoints.
 - Require **before/after evidence**, especially for stock and order state.
 
-# OUTPUT FORMAT
+## Output expected
 
 Return a markdown document with the following sections:
 
@@ -248,6 +251,6 @@ This must include:
 
 List anything that could not be fully confirmed from the repository and should be reviewed manually before execution.
 
-# GOAL
+## Final goal
 
 The final output should function as a **production-safe, human-executable validation playbook** for the real checkout system.

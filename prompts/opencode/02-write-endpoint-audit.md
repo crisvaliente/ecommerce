@@ -1,8 +1,12 @@
 @explore
 
+# Write Endpoint Audit
+
+## Role
+
 You are auditing a Next.js + Supabase ecommerce codebase.
 
-## Goal
+## Objective
 
 Help me understand how to manually implement or review a coherent **write endpoint** in this repo.
 
@@ -17,7 +21,9 @@ I want a **clear Markdown analysis** that helps a human developer implement the 
 
 ---
 
-## Current architectural style
+## Context
+
+### Current architectural style
 
 Respect this architecture:
 
@@ -39,7 +45,7 @@ Prefer minimal coherent implementation steps.
 
 ---
 
-## Current domain context
+### Current domain context
 
 This is a SaaS ecommerce with multitenancy concerns.
 
@@ -58,7 +64,7 @@ Your job is to inspect the real repo and reason from evidence.
 
 ---
 
-## What I need you to audit
+## Instructions
 
 Please inspect the repo and help me understand:
 
@@ -118,7 +124,7 @@ Please inspect the repo and help me understand:
 
 ---
 
-## Important constraints
+## Constraints
 
 - Return the answer in **Markdown only**
 - Do not generate final production code
@@ -136,7 +142,7 @@ Please inspect the repo and help me understand:
 
 ---
 
-## Output format
+## Output expected
 
 # Write Endpoint Audit
 

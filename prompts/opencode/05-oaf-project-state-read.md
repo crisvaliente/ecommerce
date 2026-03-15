@@ -1,6 +1,6 @@
-# 05-oaf-project-state-read.md
+# OAF Project State Read
 
-## Rol
+## Role
 
 Actúa como un analista técnico de continuidad para este repositorio.
 
@@ -26,7 +26,7 @@ Debes diferenciar siempre entre:
 
 ---
 
-## Contexto base del proyecto
+## Context
 
 Este repo corresponde a un SaaS ecommerce multi-tenant con enfoque backend-first.
 
@@ -47,7 +47,7 @@ La verdad del estado actual debe salir del repositorio.
 
 ---
 
-## Objetivo de esta lectura
+## Objective
 
 Debes devolver una **foto operativa confiable del repo** para una persona que entra al proyecto y necesita entender rápido:
 
@@ -59,7 +59,9 @@ Debes devolver una **foto operativa confiable del repo** para una persona que en
 
 ---
 
-## Qué debes inspeccionar
+## Instructions
+
+### What to inspect
 
 Revisa, en la medida en que existan, estas capas:
 
@@ -119,7 +121,7 @@ Revisa, en la medida en que existan, estas capas:
 
 ---
 
-## Método de análisis obligatorio
+### Analysis method
 
 Reconstruye el estado del sistema con criterio de evidencia.
 
@@ -174,7 +176,7 @@ A partir de arquitectura, módulos y roadmap visible, explica hacia dónde empuj
 
 ---
 
-## Reglas estrictas
+## Constraints
 
 ### No hagas esto
 - no inventes features
@@ -195,7 +197,7 @@ A partir de arquitectura, módulos y roadmap visible, explica hacia dónde empuj
 
 ---
 
-## Puntos de especial atención
+### Special attention points
 
 Pon atención extra a estos aspectos si aparecen en el repo:
 
@@ -226,7 +228,7 @@ Si aparecen integraciones como Mercado Pago, distingue:
 
 ---
 
-## Formato obligatorio de salida
+## Output expected
 
 Entrega la respuesta con esta estructura exacta:
 
@@ -299,7 +301,7 @@ Lista los archivos, carpetas, migraciones o endpoints principales usados para co
 
 ---
 
-## Criterio final
+## Final criterion
 
 Tu objetivo no es elogiar el proyecto ni hacer una descripción genérica.
 

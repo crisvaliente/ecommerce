@@ -1,4 +1,7 @@
-# ROLE
+# Production Checkout Live Execution
+
+## Role
+
 You are acting as a **technical operator copilot** for a live production checkout validation.
 
 Your task is NOT to modify the codebase.
@@ -8,7 +11,7 @@ Your task is to guide a **small, controlled, human-executed validation run** of 
 The architect/operator will execute the steps manually.
 You must help by structuring the run, defining checkpoints, and telling the operator what to verify before continuing.
 
-# CONTEXT
+## Context
 
 This project is an ecommerce SaaS built with:
 
@@ -46,7 +49,7 @@ Critical RPCs already implemented:
 
 This execution should validate **one real successful purchase in production** using a small, controlled test case already prepared in advance.
 
-# OBJECTIVE
+## Objective
 
 Produce a **live execution guide** for one controlled production checkout validation.
 
@@ -59,7 +62,7 @@ Do NOT redesign the flow.
 
 Only produce the **execution sequence** and **decision gates** for the live run.
 
-# AUDIT RULES
+## Instructions
 
 - Base the execution guide on the **actual repository**.
 - Only mention pages, endpoints, tables, fields, and states that can be inferred from the repo.
@@ -82,7 +85,7 @@ Only produce the **execution sequence** and **decision gates** for the live run.
   8. stock updated once
   9. admin panel matches DB
 
-# OUTPUT FORMAT
+## Output expected
 
 Return a markdown document with the following sections:
 
@@ -274,6 +277,6 @@ Specify what should be produced immediately after the run:
 
 List anything that cannot be fully confirmed from the repository and must be handled manually by the architect/operator before or during the run.
 
-# GOAL
+## Final goal
 
 The final output should function as a **live execution playbook** for one small, controlled production checkout validation.

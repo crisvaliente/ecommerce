@@ -1,5 +1,11 @@
 # Panel Module Design — OAF-TC
 
+## Role
+
+Actúa como diseñador técnico de módulo dentro de una base Next.js + Supabase orientada a OAF-TC.
+
+## Context
+
 Lee el repositorio completo antes de responder.
 
 Este proyecto es un SaaS ecommerce backend-first basado en:
@@ -18,7 +24,7 @@ No queremos mover lógica de dominio a los endpoints.
 
 ---
 
-## Contexto actual del sistema
+### Current system context
 
 El flujo de pedidos y pagos ya está implementado:
 
@@ -42,7 +48,7 @@ que devuelve el detalle completo de un pedido con:
 
 ---
 
-## Objetivo del nuevo módulo
+## Objective
 
 Implementar el primer módulo del panel administrativo:
 
@@ -56,7 +62,7 @@ Debe permitir:
 
 ---
 
-## Endpoint propuesto
+### Proposed endpoint
 
 GET /api/panel/pedidos
 
@@ -70,7 +76,7 @@ Este endpoint debe:
 
 ---
 
-## Requisitos arquitectónicos
+### Architectural requirements
 
 Mantener coherencia con el repositorio:
 
@@ -82,7 +88,9 @@ Mantener coherencia con el repositorio:
 
 ---
 
-## Tu tarea
+## Instructions
+
+### Your task
 
 1. Analizar cómo están implementados los endpoints actuales del repo.
 2. Proponer la implementación correcta para:

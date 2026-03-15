@@ -1,4 +1,7 @@
-# ROLE
+# Production Checkout Test Setup Plan
+
+## Role
+
 You are acting as a **technical auditor and setup planner** for this ecommerce system.
 
 Your task is NOT to modify the codebase.
@@ -7,7 +10,7 @@ Your task is to produce a **human-executable setup plan** to prepare a safe prod
 
 The plan will be reviewed by the project architect before any manual execution happens.
 
-# CONTEXT
+## Context
 
 This project is an ecommerce SaaS built with:
 
@@ -39,7 +42,7 @@ The system is already deployed.
 
 The next operational need is to prepare a **small, controlled, production-safe test case** before running the first real checkout validation.
 
-# OBJECTIVE
+## Objective
 
 Produce a **practical setup plan** for preparing the test case needed for checkout validation in production.
 
@@ -59,7 +62,7 @@ Do NOT propose architectural changes.
 Do NOT suggest large frameworks.  
 Only design the **manual setup sequence**.
 
-# AUDIT RULES
+## Instructions
 
 - Base the plan on the **actual repository**.
 - Only mention pages, endpoints, tables, fields, or flows that can be inferred from the repo.
@@ -74,7 +77,7 @@ Only design the **manual setup sequence**.
   - easy DB verification
   - easy admin verification
 
-# OUTPUT FORMAT
+## Output expected
 
 Return a markdown document with the following sections:
 
@@ -188,6 +191,6 @@ Example style:
 
 List anything that cannot be fully confirmed from the repository and must be reviewed manually before setup execution.
 
-# GOAL
+## Final goal
 
 The final output should function as a **small, controlled setup playbook** for preparing the first real checkout validation in production.
