@@ -5,6 +5,7 @@ const DOMAIN_ERROR_STATUS: Record<string, number> = {
   usuario_id_required: 400,
   empresa_id_required: 400,
   direccion_envio_id_required: 400,
+  direccion_envio_no_disponible: 409,
   items_required: 400,
   items_must_be_array: 400,
   pedido_sin_items: 400,
@@ -31,6 +32,23 @@ function getErrorMessage(error: unknown): string | null {
   return null;
 }
 
+async function resolveDireccionEnvioId(usuarioId: string): Promise<string | null> {
+  const { data, error } = await supabaseServer
+    .from("direccion_usuario")
+    .select("id")
+    .eq("usuario_id", usuarioId)
+    .order("fecha_creacion", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ id: string }>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data?.id ?? null;
+}
+
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
@@ -50,8 +68,19 @@ export default async function handler(
       return res.status(400).json({ error: "empresa_id_required" });
     }
 
-    if (!direccion_envio_id) {
-      return res.status(400).json({ error: "direccion_envio_id_required" });
+    let direccionEnvioId =
+      typeof direccion_envio_id === "string" && direccion_envio_id.trim().length > 0
+        ? direccion_envio_id.trim()
+        : null;
+
+    if (!direccionEnvioId) {
+      direccionEnvioId = await resolveDireccionEnvioId(usuario_id);
+    }
+
+    if (!direccionEnvioId) {
+      return res.status(DOMAIN_ERROR_STATUS.direccion_envio_no_disponible).json({
+        error: "direccion_envio_no_disponible",
+      });
     }
 
     if (!Array.isArray(items) || items.length === 0) {
@@ -61,7 +90,7 @@ export default async function handler(
     const { data, error } = await supabaseServer.rpc("crear_pedido_con_items", {
       p_usuario_id: usuario_id,
       p_empresa_id: empresa_id,
-      p_direccion_envio_id: direccion_envio_id,
+      p_direccion_envio_id: direccionEnvioId,
       p_items: items,
     });
 

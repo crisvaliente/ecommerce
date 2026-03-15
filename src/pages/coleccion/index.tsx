@@ -1,8 +1,14 @@
 import React, { useMemo, useState } from "react";
 import type { GetServerSideProps, InferGetServerSidePropsType } from "next";
+import Link from "next/link";
 import { useAuth } from "../../context/AuthContext";
 import { supabase } from "../../lib/supabaseClient";
 import { supabaseServer } from "../../lib/supabaseServer";
+
+const STOREFRONT_TENANT =
+  process.env.NODE_ENV === "production"
+    ? { slug: "raeyz", name: "Raeyz" }
+    : { slug: "empresa-smoke", name: "EMPRESA_SMOKE" };
 
 type ProductoEstado = "draft" | "published";
 
@@ -34,23 +40,79 @@ type PageProps = {
   empresaId: string | null;
   productos: ProductoStorefront[];
   error: string | null;
+  tenantSource: "default" | "query";
 };
+
+async function resolveEmpresaId(rawEmpresaId: unknown): Promise<{
+  empresaId: string | null;
+  tenantSource: "default" | "query";
+  error: string | null;
+}> {
+  if (typeof rawEmpresaId === "string" && rawEmpresaId.trim().length > 0) {
+    return {
+      empresaId: rawEmpresaId.trim(),
+      tenantSource: "query",
+      error: null,
+    };
+  }
+
+  const { data: empresaBySlug, error: slugError } = await supabaseServer
+    .from("empresa")
+    .select("id")
+    .eq("slug", STOREFRONT_TENANT.slug)
+    .maybeSingle<{ id: string }>();
+
+  if (slugError) {
+    return {
+      empresaId: null,
+      tenantSource: "default",
+      error: "storefront_tenant_not_found",
+    };
+  }
+
+  if (empresaBySlug?.id) {
+    return {
+      empresaId: empresaBySlug.id,
+      tenantSource: "default",
+      error: null,
+    };
+  }
+
+  const { data: empresaByName, error: nameError } = await supabaseServer
+    .from("empresa")
+    .select("id")
+    .ilike("nombre", STOREFRONT_TENANT.name)
+    .maybeSingle<{ id: string }>();
+
+  if (nameError || !empresaByName?.id) {
+    return {
+      empresaId: null,
+      tenantSource: "default",
+      error: "storefront_tenant_not_found",
+    };
+  }
+
+  return {
+    empresaId: empresaByName.id,
+    tenantSource: "default",
+    error: null,
+  };
+}
 
 export const getServerSideProps: GetServerSideProps<PageProps> = async (
   context
 ) => {
-  const rawEmpresaId = context.query.empresa_id;
-  const empresaId =
-    typeof rawEmpresaId === "string" && rawEmpresaId.trim().length > 0
-      ? rawEmpresaId.trim()
-      : null;
+  const { empresaId, tenantSource, error: tenantError } = await resolveEmpresaId(
+    context.query.empresa_id
+  );
 
   if (!empresaId) {
     return {
       props: {
         empresaId: null,
         productos: [],
-        error: "empresa_id_required",
+        error: tenantError,
+        tenantSource,
       },
     };
   }
@@ -69,6 +131,7 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (
         empresaId,
         productos: [],
         error: "product_read_failed",
+        tenantSource,
       },
     };
   }
@@ -83,45 +146,40 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (
     (resumenData ?? []).map((row) => [row.producto_id, row])
   );
 
-  const productos: ProductoStorefront[] = (productosData ?? []).map((p) => {
-    const resumen = resumenMap.get(p.id);
-    const stockBase = typeof p.stock === "number" ? p.stock : 0;
+  const productos: ProductoStorefront[] = (productosData ?? [])
+    .map((p) => {
+      const resumen = resumenMap.get(p.id);
+      const stockBase = typeof p.stock === "number" ? p.stock : 0;
 
-    return {
-      producto_id: p.id,
-      nombre: p.nombre,
-      descripcion: p.descripcion,
-      precio: Number(p.precio),
-      stock_efectivo:
-        typeof resumen?.stock_total === "number" ? resumen.stock_total : stockBase,
-      usa_variantes:
-        typeof resumen?.usa_variantes === "boolean" ? resumen.usa_variantes : false,
-    };
-  });
+      return {
+        producto_id: p.id,
+        nombre: p.nombre,
+        descripcion: p.descripcion,
+        precio: Number(p.precio),
+        stock_efectivo:
+          typeof resumen?.stock_total === "number" ? resumen.stock_total : stockBase,
+        usa_variantes:
+          typeof resumen?.usa_variantes === "boolean" ? resumen.usa_variantes : false,
+      };
+    })
+    .filter((producto) => !producto.usa_variantes);
 
   return {
     props: {
       empresaId,
       productos,
       error: null,
+      tenantSource,
     },
   };
 };
 
 const ColeccionPage: React.FC<
   InferGetServerSidePropsType<typeof getServerSideProps>
-> = ({ empresaId, productos, error }) => {
+> = ({ empresaId, productos, error, tenantSource }) => {
   const { sessionUser, dbUser } = useAuth();
-  const [direccionEnvioId, setDireccionEnvioId] = useState("");
   const [creatingFor, setCreatingFor] = useState<string | null>(null);
-  const [pedidoResult, setPedidoResult] = useState<{
-    pedido_id: string;
-    producto_id: string;
-  } | null>(null);
-  const [pedidoError, setPedidoError] = useState<string | null>(null);
-  const [pedidoIdParaPago, setPedidoIdParaPago] = useState("");
-  const [creatingIntento, setCreatingIntento] = useState(false);
-  const [intentoError, setIntentoError] = useState<string | null>(null);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [intentoResult, setIntentoResult] = useState<{
     id: string;
     pedido_id: string;
@@ -131,31 +189,41 @@ const ColeccionPage: React.FC<
   } | null>(null);
 
   const canCreatePedido = useMemo(() => {
-    return Boolean(sessionUser && dbUser?.id && dbUser?.empresa_id && empresaId);
-  }, [dbUser?.empresa_id, dbUser?.id, empresaId, sessionUser]);
+    return Boolean(sessionUser && dbUser?.id && empresaId);
+  }, [dbUser?.id, empresaId, sessionUser]);
 
-  const handleCrearPedido = async (producto: ProductoStorefront) => {
-    if (!canCreatePedido || !dbUser?.id || !dbUser.empresa_id || !empresaId) {
-      setPedidoError(
-        "Necesitás iniciar sesión con un usuario válido para crear el pedido."
-      );
-      return;
+  const getCheckoutErrorMessage = (code: string | null) => {
+    switch (code) {
+      case "direccion_envio_no_disponible":
+        return "Agregá una dirección en tu cuenta para poder continuar con la compra.";
+      case "direccion_no_existe":
+      case "direccion_no_pertenece_al_usuario":
+        return "No pudimos usar tu dirección guardada. Probá actualizarla y volvé a intentar.";
+      case "pedido_expirado":
+      case "pedido_bloqueado":
+      case "pedido_no_pagable":
+        return "Este pedido ya no se puede pagar. Probá iniciar la compra nuevamente.";
+      case "mercadopago_preference_error":
+        return "No pudimos abrir el checkout ahora. Probá nuevamente en unos segundos.";
+      case "unauthorized":
+        return "Necesitás iniciar sesión para continuar con la compra.";
+      default:
+        return "No pudimos iniciar la compra en este momento. Probá nuevamente.";
     }
+  };
 
-    const direccionId = direccionEnvioId.trim();
-    if (!direccionId) {
-      setPedidoError(
-        "Ingresá un direccion_envio_id válido antes de crear el pedido."
-      );
+  const handleComprar = async (producto: ProductoStorefront) => {
+    if (!canCreatePedido || !dbUser?.id || !empresaId) {
+      setCheckoutError("Necesitás iniciar sesión para continuar con la compra.");
       return;
     }
 
     setCreatingFor(producto.producto_id);
-    setPedidoError(null);
-    setPedidoResult(null);
+    setCheckoutError(null);
+    setIntentoResult(null);
 
     try {
-      const response = await fetch("/api/ecommerce/pedido", {
+      const pedidoResponse = await fetch("/api/ecommerce/pedido", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -163,7 +231,6 @@ const ColeccionPage: React.FC<
         body: JSON.stringify({
           usuario_id: dbUser.id,
           empresa_id: empresaId,
-          direccion_envio_id: direccionId,
           items: [
             {
               producto_id: producto.producto_id,
@@ -173,43 +240,15 @@ const ColeccionPage: React.FC<
         }),
       });
 
-      const body = (await response.json().catch(() => null)) as
+      const pedidoBody = (await pedidoResponse.json().catch(() => null)) as
         | { pedido_id?: string; error?: string }
         | null;
 
-      if (!response.ok || !body?.pedido_id) {
-        setPedidoError(body?.error ?? "pedido_creation_failed");
+      if (!pedidoResponse.ok || !pedidoBody?.pedido_id) {
+        setCheckoutError(getCheckoutErrorMessage(pedidoBody?.error ?? null));
         return;
       }
 
-      setPedidoResult({
-        pedido_id: body.pedido_id,
-        producto_id: producto.producto_id,
-      });
-      setPedidoIdParaPago(body.pedido_id);
-    } catch (err) {
-      console.error(err);
-      setPedidoError("unexpected_error");
-    } finally {
-      setCreatingFor(null);
-    }
-  };
-
-  const handleCrearIntentoPago = async () => {
-    const pedidoId = pedidoIdParaPago.trim();
-
-    if (!pedidoId) {
-      setIntentoError(
-        "Ingresá un pedido_id válido antes de crear el intento de pago."
-      );
-      return;
-    }
-
-    setCreatingIntento(true);
-    setIntentoError(null);
-    setIntentoResult(null);
-
-    try {
       const {
         data: { session },
         error: sessionError,
@@ -218,24 +257,22 @@ const ColeccionPage: React.FC<
       const accessToken = session?.access_token ?? null;
 
       if (sessionError || !accessToken) {
-        setIntentoError(
-          "Necesitás iniciar sesión para crear el intento de pago."
-        );
+        setCheckoutError(getCheckoutErrorMessage("unauthorized"));
         return;
       }
 
-      const response = await fetch("/api/ecommerce/intento-pago", {
+      const intentoResponse = await fetch("/api/ecommerce/intento-pago", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
-          pedido_id: pedidoId,
+          pedido_id: pedidoBody.pedido_id,
         }),
       });
 
-      const body = (await response.json().catch(() => null)) as
+      const intentoBody = (await intentoResponse.json().catch(() => null)) as
         | {
             intento_pago?: {
               id: string;
@@ -248,222 +285,188 @@ const ColeccionPage: React.FC<
           }
         | null;
 
-      if (!response.ok || !body?.intento_pago) {
-        setIntentoError(body?.error ?? "intento_pago_creation_failed");
+      if (!intentoResponse.ok || !intentoBody?.intento_pago) {
+        setCheckoutError(getCheckoutErrorMessage(intentoBody?.error ?? null));
         return;
       }
 
-      setIntentoResult(body.intento_pago);
+      setIntentoResult(intentoBody.intento_pago);
+      window.location.assign(intentoBody.intento_pago.init_point);
     } catch (err) {
       console.error(err);
-      setIntentoError("unexpected_error");
+      setCheckoutError(getCheckoutErrorMessage(null));
     } finally {
-      setCreatingIntento(false);
+      setCreatingFor(null);
     }
   };
 
   return (
-    <main className="container mx-auto p-4">
-      <h1 className="mb-4 text-3xl font-bold">Colección</h1>
-
-      {!empresaId && (
-        <p className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-          Falta <code>empresa_id</code> en la URL. Usá un enlace como
-          <code> /coleccion?empresa_id=&lt;uuid&gt;</code>.
-        </p>
-      )}
-
-      {empresaId && error === "product_read_failed" && (
-        <p className="rounded border border-rose-300 bg-rose-50 p-3 text-sm text-rose-900">
-          No se pudieron cargar los productos publicados para esta empresa.
-        </p>
-      )}
-
-      {empresaId && !error && productos.length === 0 && (
-        <p className="text-sm text-slate-600">
-          No hay productos publicados para esta empresa.
-        </p>
-      )}
-
-      {empresaId && !error && (
-        <section className="mb-6 rounded-lg border border-slate-200 bg-slate-50 p-4">
-          <h2 className="text-lg font-semibold text-slate-900">
-            Crear pedido de validación
-          </h2>
-          <p className="mt-1 text-sm text-slate-600">
-            Camino mínimo: producto simple, cantidad fija 1 y dirección ingresada
-            manualmente.
-          </p>
-
-          <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
-            <label className="block text-sm text-slate-700">
-              <span className="mb-1 block font-medium">direccion_envio_id</span>
-              <input
-                type="text"
-                value={direccionEnvioId}
-                onChange={(e) => setDireccionEnvioId(e.target.value)}
-                className="w-full rounded border border-slate-300 px-3 py-2 font-mono text-sm"
-                placeholder="uuid de public.direccion_usuario"
-              />
-            </label>
-
-            <div className="text-sm text-slate-600">
-              {canCreatePedido
-                ? `Usuario: ${dbUser?.correo ?? dbUser?.id}`
-                : "Iniciá sesión para habilitar la creación del pedido."}
+    <main className="min-h-screen bg-stone-100 px-4 py-10 text-stone-900">
+      <div className="mx-auto max-w-6xl">
+        <section className="overflow-hidden rounded-[32px] border border-stone-200 bg-gradient-to-br from-stone-950 via-stone-900 to-amber-950 px-6 py-10 text-stone-50 shadow-xl sm:px-8">
+          <div className="max-w-3xl">
+            <p className="text-xs uppercase tracking-[0.3em] text-amber-200/80">
+              {STOREFRONT_TENANT.name}
+            </p>
+            <h1 className="mt-3 text-4xl font-semibold tracking-tight sm:text-5xl">
+              Coleccion lista para comprar.
+            </h1>
+            <p className="mt-4 max-w-2xl text-sm leading-6 text-stone-300 sm:text-base">
+              Elegi un producto disponible y te llevamos directo al checkout. Si ya
+              tenes sesion iniciada, usamos tu direccion guardada mas reciente.
+            </p>
+            <div className="mt-6 flex flex-wrap items-center gap-3 text-sm">
+              <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-stone-100">
+                Productos simples
+              </span>
+              <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-stone-100">
+                Pago con Mercado Pago
+              </span>
+              {tenantSource === "query" && (
+                <span className="rounded-full border border-amber-300/30 bg-amber-200/10 px-3 py-1 text-amber-100">
+                  Modo prueba por query
+                </span>
+              )}
             </div>
           </div>
+        </section>
 
-          {pedidoError && (
-            <p className="mt-3 text-sm text-rose-700">Error: {pedidoError}</p>
-          )}
-
-          {pedidoResult && (
-            <p className="mt-3 text-sm text-emerald-700">
-              Pedido creado: <code>{pedidoResult.pedido_id}</code> para producto{" "}
-              <code>{pedidoResult.producto_id}</code>
+        <section className="mt-6 rounded-[28px] border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
+          {!empresaId && error === "storefront_tenant_not_found" && (
+            <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              No pudimos cargar la tienda de {STOREFRONT_TENANT.name} en este entorno.
             </p>
           )}
-        </section>
-      )}
 
-      {empresaId && !error && (
-        <section className="mb-6 rounded-lg border border-slate-200 bg-slate-50 p-4">
-          <h2 className="text-lg font-semibold text-slate-900">
-            Crear intento de pago de validación
-          </h2>
-          <p className="mt-1 text-sm text-slate-600">
-            Camino mínimo: usar un pedido pendiente existente y abrir el bridge de
-            Mercado Pago.
-          </p>
+          {empresaId && error === "product_read_failed" && (
+            <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+              No pudimos cargar los productos disponibles ahora.
+            </p>
+          )}
 
-          <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
-            <label className="block text-sm text-slate-700">
-              <span className="mb-1 block font-medium">pedido_id</span>
-              <input
-                type="text"
-                value={pedidoIdParaPago}
-                onChange={(e) => setPedidoIdParaPago(e.target.value)}
-                className="w-full rounded border border-slate-300 px-3 py-2 font-mono text-sm"
-                placeholder="uuid de public.pedido"
-              />
-            </label>
+          {empresaId && !error && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-stone-50 px-4 py-4">
+              <div>
+                <p className="text-sm font-medium text-stone-900">
+                  {canCreatePedido
+                    ? `Comprando como ${dbUser?.correo ?? "tu cuenta"}`
+                    : "Inicia sesion para continuar con la compra"}
+                </p>
+                <p className="mt-1 text-sm text-stone-600">
+                  {canCreatePedido
+                    ? "Al continuar, armamos tu pedido y abrimos el checkout automaticamente."
+                    : "Necesitas una cuenta con una direccion guardada para avanzar al checkout."}
+                </p>
+              </div>
 
-            <button
-              type="button"
-              onClick={handleCrearIntentoPago}
-              disabled={creatingIntento || !pedidoIdParaPago.trim()}
-              className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-            >
-              {creatingIntento ? "Creando intento..." : "Crear intento de pago"}
-            </button>
-          </div>
+              {!canCreatePedido && (
+                <Link
+                  href="/auth/login"
+                  className="rounded-full bg-stone-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-stone-700"
+                >
+                  Iniciar sesion
+                </Link>
+              )}
+            </div>
+          )}
 
-          {intentoError && (
-            <p className="mt-3 text-sm text-rose-700">Error: {intentoError}</p>
+          {checkoutError && (
+            <p className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+              {checkoutError}
+            </p>
           )}
 
           {intentoResult && (
-            <div className="mt-3 space-y-2 text-sm text-emerald-700">
-              <p>
-                Intento creado: <code>{intentoResult.id}</code>
-              </p>
-              <p>
-                Preference: <code>{intentoResult.preference_id}</code>
-              </p>
-              <p>
-                Estado: <code>{intentoResult.estado}</code>
-              </p>
-              <p>
-                <a
-                  href={intentoResult.init_point}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-medium underline"
-                >
-                  Abrir Checkout Pro
-                </a>
-              </p>
+            <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+              Estamos abriendo el checkout. Si no se abre automaticamente, usa este{" "}
+              <a
+                href={intentoResult.init_point}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium underline"
+              >
+                enlace de pago
+              </a>
+              .
             </div>
           )}
         </section>
-      )}
 
-      {productos.length > 0 && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {productos.map((producto) => (
-            <article
-              key={producto.producto_id}
-              className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
-            >
-              <div className="mb-2 flex items-start justify-between gap-3">
-                <h2 className="text-lg font-semibold text-slate-900">
-                  {producto.nombre}
-                </h2>
-                {producto.usa_variantes && (
-                  <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">
-                    Variantes
+        {empresaId && !error && productos.length === 0 && (
+          <p className="mt-6 text-sm text-stone-600">
+            No hay productos disponibles para compra en este momento.
+          </p>
+        )}
+
+        {productos.length > 0 && (
+          <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {productos.map((producto) => (
+              <article
+                key={producto.producto_id}
+                className="rounded-[28px] border border-stone-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+              >
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <h2 className="text-xl font-semibold text-stone-900">
+                    {producto.nombre}
+                  </h2>
+                  <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-900">
+                    Disponible
                   </span>
-                )}
-              </div>
-
-              {producto.descripcion && (
-                <p className="mb-3 text-sm text-slate-600">{producto.descripcion}</p>
-              )}
-
-              <dl className="space-y-1 text-sm text-slate-700">
-                <div className="flex justify-between gap-3">
-                  <dt>Precio</dt>
-                  <dd>
-                    {producto.precio.toLocaleString("es-UY", {
-                      style: "currency",
-                      currency: "UYU",
-                    })}
-                  </dd>
                 </div>
-                <div className="flex justify-between gap-3">
-                  <dt>Stock</dt>
-                  <dd>{producto.stock_efectivo}</dd>
-                </div>
-                <div className="flex justify-between gap-3">
-                  <dt>ID</dt>
-                  <dd className="font-mono text-xs">{producto.producto_id}</dd>
-                </div>
-              </dl>
 
-              <div className="mt-4">
-                <button
-                  type="button"
-                  onClick={() => handleCrearPedido(producto)}
-                  disabled={
-                    !canCreatePedido ||
-                    producto.usa_variantes ||
-                    producto.stock_efectivo <= 0 ||
-                    creatingFor === producto.producto_id
-                  }
-                  className="w-full rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-                >
-                  {creatingFor === producto.producto_id
-                    ? "Creando pedido..."
-                    : "Crear pedido (1 unidad)"}
-                </button>
-
-                {producto.usa_variantes && (
-                  <p className="mt-2 text-xs text-amber-700">
-                    Este camino mínimo no soporta variantes.
+                {producto.descripcion && (
+                  <p className="mb-4 text-sm leading-6 text-stone-600">
+                    {producto.descripcion}
                   </p>
                 )}
 
-                {producto.stock_efectivo <= 0 && (
-                  <p className="mt-2 text-xs text-rose-700">
-                    Stock no disponible para prueba controlada.
-                  </p>
-                )}
-              </div>
-            </article>
-          ))}
-        </div>
-      )}
+                <dl className="space-y-2 text-sm text-stone-700">
+                  <div className="flex justify-between gap-3 border-b border-stone-100 pb-2">
+                    <dt>Precio</dt>
+                    <dd className="font-medium text-stone-950">
+                      {producto.precio.toLocaleString("es-UY", {
+                        style: "currency",
+                        currency: "UYU",
+                      })}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt>Disponibilidad</dt>
+                    <dd>
+                      {producto.stock_efectivo > 0
+                        ? `${producto.stock_efectivo} unidades`
+                        : "Sin stock"}
+                    </dd>
+                  </div>
+                </dl>
+
+                <div className="mt-4">
+                  <button
+                    type="button"
+                    onClick={() => handleComprar(producto)}
+                    disabled={
+                      !canCreatePedido ||
+                      producto.stock_efectivo <= 0 ||
+                      creatingFor === producto.producto_id
+                    }
+                    className="w-full rounded-full bg-stone-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:bg-stone-300"
+                  >
+                    {creatingFor === producto.producto_id
+                      ? "Preparando checkout..."
+                      : "Comprar ahora"}
+                  </button>
+
+                  {producto.stock_efectivo <= 0 && (
+                    <p className="mt-2 text-xs text-rose-700">
+                      Este producto no tiene stock disponible ahora.
+                    </p>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
     </main>
   );
 };

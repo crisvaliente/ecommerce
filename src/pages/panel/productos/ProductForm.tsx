@@ -167,6 +167,16 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   const [loadingImagenes, setLoadingImagenes] = useState(false);
   const [uploadingImagen, setUploadingImagen] = useState(false);
 
+  const showError = (message: string) => {
+    setSaveErr(message);
+    setSaveMessage(null);
+  };
+
+  const showSuccess = (message: string) => {
+    setSaveErr(null);
+    setSaveMessage(message);
+  };
+
   // ============================
   // Helpers stock resumen
   // ============================
@@ -287,7 +297,7 @@ const setPrincipalImagen = async (imagenId: string) => {
 
   if (e1) {
     console.error("Error limpiando principal:", e1);
-    alert("No se pudo actualizar principal.");
+    showError("No se pudo actualizar la imagen principal.");
     return;
   }
 
@@ -301,13 +311,14 @@ const setPrincipalImagen = async (imagenId: string) => {
 
   if (e2) {
     console.error("Error seteando principal:", e2);
-    alert("No se pudo actualizar principal.");
+    showError("No se pudo actualizar la imagen principal.");
     return;
   }
 
   setImagenes((prev) =>
     prev.map((img) => ({ ...img, es_principal: img.id === imagenId }))
   );
+  showSuccess("Imagen principal actualizada.");
 };
 
 // ============================
@@ -322,7 +333,7 @@ const handleDeleteImagen = async (img: ImagenProductoUI) => {
   try {
     // 0) Guardas rápidas de coherencia
     if (img.producto_id !== productoId) {
-      alert("Esta imagen no pertenece al producto actual (guard).");
+      showError("La imagen no pertenece al producto actual.");
       return;
     }
 
@@ -335,7 +346,7 @@ const handleDeleteImagen = async (img: ImagenProductoUI) => {
 
     if (rpcErr) {
       console.error("[delete-image] RPC error:", rpcErr);
-      alert(JSON.stringify(rpcErr, null, 2));
+      showError("No se pudo eliminar la imagen.");
       return;
     }
 
@@ -384,11 +395,12 @@ const handleDeleteImagen = async (img: ImagenProductoUI) => {
 
     // 5) Consistencia final (DB manda)
     await fetchImagenes();
+    showSuccess("Imagen eliminada correctamente.");
   } catch (e: unknown) {
     console.error("[handleDeleteImagen] catch:", e);
     const message =
       e instanceof Error ? e.message : typeof e === "string" ? e : "Error eliminando imagen.";
-    alert(message);
+    showError(message);
   }
 };
 
@@ -401,22 +413,23 @@ const handleDeleteImagen = async (img: ImagenProductoUI) => {
 // ============================
 const handleUploadImagen = async (file: File) => {
   if (!productoId) {
-    alert("Primero creá el producto.");
+    showError("Primero creá el producto para poder subir imágenes.");
     return;
   }
 
   if (!empresaId) {
-    alert("No se encontró empresa asociada al usuario.");
+    showError("No se encontró una empresa asociada al usuario.");
     return;
   }
 
   setUploadingImagen(true);
+  setSaveErr(null);
 
   console.log("[B2] ==== PRE-FLIGHT ====");
   const { data: userRes, error: userErr } = await supabase.auth.getUser();
   if (userErr) {
     console.error("[B2] getUser error:", userErr);
-    alert(userErr.message);
+    showError(userErr.message);
     setUploadingImagen(false);
     return;
   }
@@ -426,7 +439,7 @@ const handleUploadImagen = async (file: File) => {
   console.log("[B2] productoId:", productoId ?? null);
 
   if (!userRes.user?.id) {
-    alert("No auth (uid null)");
+    showError("Necesitás una sesión válida para subir imágenes.");
     setUploadingImagen(false);
     return;
   }
@@ -500,6 +513,7 @@ const handleUploadImagen = async (file: File) => {
     if (shouldBePrincipal) {
       await setPrincipalImagen(inserted.id);
     }
+    showSuccess("Imagen subida correctamente.");
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Error subiendo imagen.";
     console.error("[B2] ERROR:", message);
@@ -517,7 +531,7 @@ const handleUploadImagen = async (file: File) => {
       }
     }
 
-    alert(message);
+    showError(message);
   } finally {
     setUploadingImagen(false);
   }
@@ -748,7 +762,7 @@ if (productoId) {
 
     if (error) {
       console.error("Error seteando usa_variantes post-create:", error);
-      alert(
+      showError(
         "El producto se creó, pero no se pudo activar modo variantes automáticamente. Podés activarlo desde edición con 'Pasar a variantes'."
       );
     }
@@ -876,7 +890,7 @@ const handleDraft = async () => {
     if (!empresaId) return;
 
     if (!varForm.nombre.trim()) {
-      alert("El talle es obligatorio.");
+      showError("El talle es obligatorio para guardar la variante.");
       return;
     }
 
@@ -899,7 +913,7 @@ const handleDraft = async () => {
 
       if (error) {
         console.error("Error actualizando variante:", error);
-        alert("Error guardando variante.");
+        showError("No se pudo guardar la variante.");
         setVarSaving(false);
         return;
       }
@@ -908,7 +922,7 @@ const handleDraft = async () => {
 
       if (error) {
         console.error("Error creando variante:", error);
-        alert("Error creando variante.");
+        showError("No se pudo crear la variante.");
         setVarSaving(false);
         return;
       }
@@ -919,6 +933,7 @@ const handleDraft = async () => {
 
     setVarSaving(false);
     setVarModalOpen(false);
+    showSuccess(varEditingId ? "Variante actualizada correctamente." : "Variante creada correctamente.");
   };
 
   const toggleVarianteActivo = async (v: ProductoVariante) => {
@@ -935,7 +950,7 @@ const handleDraft = async () => {
 
     if (error) {
       console.error("Error toggling activo:", error);
-      alert("No se pudo actualizar el estado.");
+      showError("No se pudo actualizar el estado de la variante.");
       return;
     }
 
@@ -943,6 +958,9 @@ const handleDraft = async () => {
       prev.map((x) => (x.id === v.id ? { ...x, activo: nextActivo } : x))
     );
     await fetchResumenStock();
+    showSuccess(
+      nextActivo ? "Variante activada correctamente." : "Variante desactivada correctamente."
+    );
   };
 
   const deleteVariante = async (v: ProductoVariante) => {
@@ -960,12 +978,13 @@ const handleDraft = async () => {
 
     if (error) {
       console.error("Error eliminando variante:", error);
-      alert("No se pudo eliminar la variante.");
+      showError("No se pudo eliminar la variante.");
       return;
     }
 
     setVariantes((prev) => prev.filter((x) => x.id !== v.id));
     await fetchResumenStock();
+    showSuccess("Variante eliminada correctamente.");
   };
 
   // ============================
@@ -973,7 +992,7 @@ const handleDraft = async () => {
   // ============================
   const handlePasarAVariantes = async () => {
     if (!productoId) {
-      alert("Primero creá el producto para poder activar variantes.");
+      showError("Primero creá el producto para poder activar variantes.");
       return;
     }
     if (!empresaId) return;
@@ -1000,23 +1019,22 @@ const handleDraft = async () => {
         await fetchResumenStock();
         await fetchVariantes();
         setUsaVariantes(true);
+        showSuccess("El producto ya estaba configurado para usar variantes.");
         return;
       }
 
       const stockDB = Number(prod.stock ?? 0);
       const stockToMigrate = Number.isFinite(stockDB) ? stockDB : 0;
 
-      const ok = confirm(
-        "¿Pasar a modo variantes?\n\nEl stock real se gestionará en variantes. El stock simple quedará como fallback legacy."
-      );
+      const confirmMessage =
+        stockToMigrate > 0
+          ? `¿Pasar a modo variantes?\n\nEste producto tiene stock simple actual (${stockToMigrate}). Ese stock se migrará a una variante inicial \"Único\" y, a partir de entonces, el stock se gestionará desde variantes.`
+          : "¿Pasar a modo variantes?\n\nA partir de este cambio, el stock se gestionará desde variantes.";
+
+      const ok = confirm(confirmMessage);
       if (!ok) return;
 
-      let shouldMigrate = false;
-      if (stockToMigrate > 0) {
-        shouldMigrate = confirm(
-          `Este producto tiene stock actual (${stockToMigrate}).\n\n¿Querés migrarlo a una variante inicial "Único"?`
-        );
-      }
+      const shouldMigrate = stockToMigrate > 0;
 
       if (shouldMigrate) {
         const { data: existing, error: exErr } = await supabase
@@ -1054,6 +1072,7 @@ const handleDraft = async () => {
       await fetchResumenStock();
       setUsaVariantes(true);
       await fetchVariantes();
+      showSuccess("Modo variantes activado correctamente.");
     } catch (err: unknown) {
       console.error("Error pasando a variantes (B1.4):", err);
 
@@ -1064,7 +1083,7 @@ const handleDraft = async () => {
           ? err
           : "No se pudo activar el modo variantes.";
 
-      alert(message);
+      showError(message);
     } finally {
       setSwitchingToVariantes(false);
     }
@@ -1186,7 +1205,7 @@ const handleDraft = async () => {
             <span>
               <span className="font-medium">Crear en modo variantes</span>
               <span className="block text-xs text-white/60">
-                Al crear, se activará <b>usa_variantes=true</b> y luego podrás cargar talles/stock desde variantes.
+                Opcional. Si no lo activás, podés crear primero un producto simple y publicarlo más rápido.
               </span>
             </span>
           </label>
@@ -1195,7 +1214,7 @@ const handleDraft = async () => {
 
         {/* Nombre */}
         <div>
-        <label className="block font-medium">Nombre</label>
+        <label className="block font-medium">Nombre *</label>
         <input
           type="text"
           name="nombre"
@@ -1215,11 +1234,12 @@ const handleDraft = async () => {
           value={form.descripcion}
           onChange={handleChange}
         />
+        <div className="mt-1 text-xs text-white/60">Opcional. Podés completarla más adelante.</div>
         </div>
 
         {/* Precio */}
         <div>
-        <label className="block font-medium">Precio</label>
+        <label className="block font-medium">Precio *</label>
         <input
           type="number"
           name="precio"
@@ -1263,7 +1283,7 @@ const handleDraft = async () => {
               required
               min={0}
             />
-            <div className="mt-1 text-xs text-white/60">Stock simple (legacy).</div>
+            <div className="mt-1 text-xs text-white/60">Obligatorio para el camino simple. Es el stock que se descuenta mientras el producto no use variantes.</div>
           </div>
           </div>
         )}
@@ -1278,6 +1298,7 @@ const handleDraft = async () => {
           value={form.tipo}
           onChange={handleChange}
         />
+        <div className="mt-1 text-xs text-white/60">Opcional. Podés dejarlo vacío al crear un producto simple.</div>
         </div>
 
         {/* Categoría */}
@@ -1300,6 +1321,7 @@ const handleDraft = async () => {
             </option>
           ))}
         </select>
+        <div className="mt-1 text-xs text-white/60">Opcional. Si todavía no definiste una categoría, podés crear el producto igual.</div>
         </div>
       </section>
 
@@ -1308,7 +1330,7 @@ const handleDraft = async () => {
          ============================ */}
       <details className="rounded-lg border border-white/10 bg-white/5 p-3">
         <summary className="cursor-pointer list-none text-sm font-medium text-white/90">
-          Opciones avanzadas: imágenes
+          Opciones avanzadas: imágenes (opcionales al inicio)
         </summary>
         <div className="mt-3">
         <div className="flex items-start justify-between gap-3">
@@ -1402,9 +1424,6 @@ const handleDraft = async () => {
                   </button>
                 </div>
 
-                <div className="mt-1 text-[11px] text-white/50 break-all">
-                  {img.path ?? img.url_imagen}
-                </div>
               </div>
             ))
           )}
@@ -1416,7 +1435,7 @@ const handleDraft = async () => {
           Variantes block (solo si usa_variantes)
          ============================ */}
       {usaVariantes && (
-        <details className="rounded-lg border border-white/10 bg-white/5 p-3" open>
+        <details className="rounded-lg border border-white/10 bg-white/5 p-3">
           <summary className="cursor-pointer list-none text-sm font-medium text-white/90">
             Opciones avanzadas: variantes y stock por talle
           </summary>
