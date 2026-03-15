@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from "react";
 import type { GetServerSideProps, InferGetServerSidePropsType } from "next";
 import { useAuth } from "../../context/AuthContext";
-import { supabaseServer } from "../../lib/supabaseServer";
 import { supabase } from "../../lib/supabaseClient";
+import { supabaseServer } from "../../lib/supabaseServer";
 
 type ProductoEstado = "draft" | "published";
 
@@ -199,7 +199,9 @@ const ColeccionPage: React.FC<
     const pedidoId = pedidoIdParaPago.trim();
 
     if (!pedidoId) {
-      setIntentoError("Ingresá un pedido_id válido antes de crear el intento de pago.");
+      setIntentoError(
+        "Ingresá un pedido_id válido antes de crear el intento de pago."
+      );
       return;
     }
 
@@ -216,7 +218,9 @@ const ColeccionPage: React.FC<
       const accessToken = session?.access_token ?? null;
 
       if (sessionError || !accessToken) {
-        setIntentoError("Necesitás iniciar sesión para crear el intento de pago.");
+        setIntentoError(
+          "Necesitás iniciar sesión para crear el intento de pago."
+        );
         return;
       }
 
@@ -329,7 +333,8 @@ const ColeccionPage: React.FC<
             Crear intento de pago de validación
           </h2>
           <p className="mt-1 text-sm text-slate-600">
-            Camino mínimo: usar un pedido pendiente existente y abrir el bridge de Mercado Pago.
+            Camino mínimo: usar un pedido pendiente existente y abrir el bridge de
+            Mercado Pago.
           </p>
 
           <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
