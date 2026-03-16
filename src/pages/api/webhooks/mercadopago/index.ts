@@ -8,6 +8,12 @@ type MpWebhookBody = {
   data?: {
     id?: string | number;
   };
+  dev_mock_payment?: {
+    id?: string | number;
+    status?: string | null;
+    status_detail?: string | null;
+    external_reference?: string | null;
+  };
   date_created?: string;
   id?: string | number;
   live_mode?: boolean;
@@ -68,6 +74,7 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const MP_ACCESS_TOKEN = process.env.MERCADOPAGO_ACCESS_TOKEN;
 const MP_WEBHOOK_SECRET = process.env.MERCADOPAGO_WEBHOOK_SECRET;
+const DEV_WEBHOOK_MODE = process.env.MP_WEBHOOK_DEV_MODE === "1";
 
 function getSingleQueryValue(
   value: string | string[] | undefined
@@ -150,6 +157,35 @@ function validateMpWebhookSignature(req: NextApiRequest): boolean {
   return safeCompareHex(calculated, v1);
 }
 
+function getTraceId(req: NextApiRequest): string {
+  const xRequestId = req.headers["x-request-id"];
+  const value = typeof xRequestId === "string" ? xRequestId : xRequestId?.[0] ?? null;
+  return value?.trim() || crypto.randomUUID();
+}
+
+function isDevBypassEnabled(req: NextApiRequest): boolean {
+  if (process.env.NODE_ENV === "production" || !DEV_WEBHOOK_MODE) {
+    return false;
+  }
+
+  const raw = req.headers["x-dev-webhook-bypass"];
+  const value = typeof raw === "string" ? raw : raw?.[0] ?? null;
+  return value === "1";
+}
+
+function getMockPaymentFromBody(body: MpWebhookBody): MpPaymentResponse | null {
+  const mock = body.dev_mock_payment;
+
+  if (!mock?.id) return null;
+
+  return {
+    id: mock.id,
+    status: mock.status ?? null,
+    status_detail: mock.status_detail ?? null,
+    external_reference: mock.external_reference?.trim() ?? null,
+  };
+}
+
 function mapMpStatusToInternal(
   mpStatus: string | null | undefined
 ): "aprobado" | "rechazado" | "cancelado" | null {
@@ -190,11 +226,21 @@ export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse<ApiOk | ApiErr>
 ) {
+  const traceId = getTraceId(req);
+
   if (req.method !== "POST") {
+    console.log("[mp-webhook] method_not_allowed", { traceId, method: req.method });
     return res.status(405).json({ error: "method_not_allowed" });
   }
 
   if (!SUPABASE_URL || !SERVICE_ROLE || !MP_ACCESS_TOKEN || !MP_WEBHOOK_SECRET) {
+    console.error("[mp-webhook] server_misconfigured", {
+      traceId,
+      hasSupabaseUrl: Boolean(SUPABASE_URL),
+      hasServiceRole: Boolean(SERVICE_ROLE),
+      hasMpAccessToken: Boolean(MP_ACCESS_TOKEN),
+      hasWebhookSecret: Boolean(MP_WEBHOOK_SECRET),
+    });
     return res.status(500).json({ error: "server_misconfigured" });
   }
 
@@ -205,7 +251,23 @@ export default async function handler(
     getSingleQueryValue(req.query.type) ??
     getSingleQueryValue(req.query.topic);
 
+  console.log("[mp-webhook] incoming", {
+    traceId,
+    method: req.method,
+    eventType,
+    bodyType: body.type ?? null,
+    bodyAction: body.action ?? null,
+    queryDataId: getSingleQueryValue(req.query["data.id"]),
+    bodyDataId: body.data?.id != null ? String(body.data.id) : null,
+    devBypass: isDevBypassEnabled(req),
+  });
+
   if (eventType !== "payment") {
+    console.log("[mp-webhook] absorbed", {
+      traceId,
+      reason: "not_payment_event",
+      eventType,
+    });
     return res.status(200).json({
       ok: true,
       absorbed: true,
@@ -213,7 +275,14 @@ export default async function handler(
     });
   }
 
-  const signatureOk = validateMpWebhookSignature(req);
+  const devBypass = isDevBypassEnabled(req);
+  const signatureOk = devBypass ? true : validateMpWebhookSignature(req);
+
+  console.log("[mp-webhook] signature", {
+    traceId,
+    signatureOk,
+    devBypass,
+  });
 
   if (!signatureOk) {
     return res.status(401).json({ error: "invalid_webhook_signature" });
@@ -223,7 +292,16 @@ export default async function handler(
     getSingleQueryValue(req.query["data.id"]) ??
     (body.data?.id != null ? String(body.data.id) : null);
 
+  console.log("[mp-webhook] payment_id", {
+    traceId,
+    paymentId,
+  });
+
   if (!paymentId) {
+    console.log("[mp-webhook] absorbed", {
+      traceId,
+      reason: "missing_payment_id",
+    });
     return res.status(200).json({
       ok: true,
       absorbed: true,
@@ -237,24 +315,42 @@ export default async function handler(
 
   try {
     let mpPayment: MpPaymentResponse;
+    const mockPayment = devBypass ? getMockPaymentFromBody(body) : null;
 
-    try {
-      mpPayment = await fetchMpPayment(paymentId);
-    } catch (err) {
-      console.warn("[mp-webhook] payment lookup failed", {
+    if (mockPayment) {
+      mpPayment = mockPayment;
+      console.log("[mp-webhook] payment_lookup_mock", {
+        traceId,
         paymentId,
-        eventType,
-        action: body.action ?? null,
-        reason: "payment_lookup_failed",
-        detail: err instanceof Error ? err.message : "unknown_error",
+        mpPayment,
       });
+    } else {
+      try {
+        mpPayment = await fetchMpPayment(paymentId);
+        console.log("[mp-webhook] payment_lookup", {
+          traceId,
+          paymentId,
+          mpPaymentId: String(mpPayment.id),
+          mpStatus: mpPayment.status ?? null,
+          externalReference: mpPayment.external_reference ?? null,
+        });
+      } catch (err) {
+        console.warn("[mp-webhook] payment lookup failed", {
+          traceId,
+          paymentId,
+          eventType,
+          action: body.action ?? null,
+          reason: "payment_lookup_failed",
+          detail: err instanceof Error ? err.message : "unknown_error",
+        });
 
-      return res.status(200).json({
-        ok: true,
-        absorbed: true,
-        reason: "payment_lookup_failed",
-        paymentId,
-      });
+        return res.status(200).json({
+          ok: true,
+          absorbed: true,
+          reason: "payment_lookup_failed",
+          paymentId,
+        });
+      }
     }
 
     const externalId = String(mpPayment.id);
@@ -262,7 +358,20 @@ export default async function handler(
     const mpStatus = mpPayment.status ?? null;
     const internalTargetStatus = mapMpStatusToInternal(mpStatus);
 
+    console.log("[mp-webhook] payment_resolved", {
+      traceId,
+      externalId,
+      externalReference,
+      mpStatus,
+      internalTargetStatus,
+    });
+
     if (!externalReference) {
+      console.log("[mp-webhook] absorbed", {
+        traceId,
+        reason: "payment_without_external_reference",
+        paymentId,
+      });
       return res.status(200).json({
         ok: true,
         absorbed: true,
@@ -276,6 +385,13 @@ export default async function handler(
       .eq("id", externalReference)
       .maybeSingle();
 
+    console.log("[mp-webhook] correlation", {
+      traceId,
+      externalReference,
+      foundIntent: Boolean(existingIntent),
+      readError: existingIntentErr?.message ?? null,
+    });
+
     if (existingIntentErr) {
       return res.status(500).json({
         error: "db_read_failed",
@@ -284,6 +400,11 @@ export default async function handler(
     }
 
     if (!existingIntent) {
+      console.log("[mp-webhook] absorbed", {
+        traceId,
+        reason: "payment_not_correlatable",
+        externalReference,
+      });
       return res.status(200).json({
         ok: true,
         absorbed: true,
@@ -303,6 +424,14 @@ export default async function handler(
       })
       .eq("id", externalReference);
 
+    console.log("[mp-webhook] snapshot_update", {
+      traceId,
+      intentoPagoId: externalReference,
+      externalId,
+      updateOk: !updateErr,
+      updateError: updateErr?.message ?? null,
+    });
+
     if (updateErr) {
       return res.status(500).json({
         error: "db_update_failed",
@@ -311,6 +440,11 @@ export default async function handler(
     }
 
     if (!internalTargetStatus) {
+      console.log("[mp-webhook] absorbed", {
+        traceId,
+        reason: "payment_status_ignored",
+        mpStatus,
+      });
       return res.status(200).json({
         ok: true,
         absorbed: true,
@@ -326,16 +460,24 @@ export default async function handler(
       }
     );
 
+    const rpcRow = Array.isArray(rpcData)
+      ? ((rpcData[0] ?? null) as RpcRow | null)
+      : ((rpcData ?? null) as RpcRow | null);
+
+    console.log("[mp-webhook] rpc", {
+      traceId,
+      intentoPagoId: externalReference,
+      internalTargetStatus,
+      rpcError: rpcErr?.message ?? null,
+      rpcRow,
+    });
+
     if (rpcErr) {
       return res.status(500).json({
         error: "rpc_failed",
         detail: rpcErr.message,
       });
     }
-
-    const rpcRow = Array.isArray(rpcData)
-      ? ((rpcData[0] ?? null) as RpcRow | null)
-      : ((rpcData ?? null) as RpcRow | null);
 
     return res.status(200).json({
       ok: true,
@@ -348,6 +490,10 @@ export default async function handler(
     });
   } catch (err) {
     const detail = err instanceof Error ? err.message : "unknown_error";
+    console.error("[mp-webhook] unexpected", {
+      traceId,
+      detail,
+    });
     return res.status(500).json({
       error: "webhook_processing_failed",
       detail,
