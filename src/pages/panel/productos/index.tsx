@@ -1,6 +1,9 @@
 // src/pages/panel/productos/index.tsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import AdminLayout from "../../../components/layout/AdminLayout";
+import Button from "../../../components/ui/Button";
+import Card from "../../../components/ui/Card";
+import Input from "../../../components/ui/Input";
 import { useAuth } from "../../../context/AuthContext";
 import { supabase } from "../../../lib/supabaseClient";
 import Link from "next/link";
@@ -183,14 +186,14 @@ const ProductosPage: React.FC = () => {
   const renderEstadoBadge = (estado: ProductoEstado) => {
     if (estado === "published") {
       return (
-        <span className="inline-flex items-center rounded-full border border-emerald-500/40 bg-emerald-600/20 px-2.5 py-0.5 text-xs font-medium text-emerald-200">
+        <span className="inline-flex items-center rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
           Publicado
         </span>
       );
     }
 
     return (
-      <span className="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-600/20 px-2.5 py-0.5 text-xs font-medium text-amber-200">
+      <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-700">
         Borrador
       </span>
     );
@@ -199,7 +202,7 @@ const ProductosPage: React.FC = () => {
   const renderVariantesBadge = (usaVariantes: boolean) => {
     if (!usaVariantes) return null;
     return (
-      <span className="ml-2 inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] font-medium text-slate-200">
+      <span className="ml-2 inline-flex items-center rounded-full border border-border bg-black/[0.03] px-2 py-0.5 text-[11px] font-medium text-muted">
         Variantes
       </span>
     );
@@ -209,125 +212,125 @@ const ProductosPage: React.FC = () => {
     <AdminLayout>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Productos</h1>
-          <p className="text-sm text-slate-300">
+          <h1 className="font-raleway text-2xl font-semibold text-text">Productos</h1>
+          <p className="text-sm text-muted">
             Organizá el catalogo de tu tienda y revisa que este listo para publicar.
           </p>
         </div>
 
         <div className="flex items-center gap-3">
-          <select
+          <Input
+            as="select"
             value={filtro}
             onChange={(e) => setFiltro(e.target.value as FiltroEstado)}
-            className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200"
+            className="min-w-[180px]"
             aria-label="Filtrar productos por estado"
           >
             <option value="all">Todos</option>
             <option value="published">Publicados</option>
             <option value="draft">Borradores</option>
-          </select>
+          </Input>
 
-          <button
-            type="button"
+          <Button
+            variant="secondary"
             onClick={fetchProductos}
             disabled={loading}
-            className="rounded-lg bg-white/10 px-4 py-2 text-sm font-medium text-white hover:bg-white/15 disabled:opacity-60"
           >
-            {loading ? "Cargando…" : "Refrescar"}
-          </button>
+            {loading ? "Cargando..." : "Refrescar"}
+          </Button>
 
-          <Link
-            href="/panel/productos/nuevo"
-            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-          >
-            Nuevo producto
+          <Link href="/panel/productos/nuevo">
+            <Button as="span" variant="primary">
+              Nuevo producto
+            </Button>
           </Link>
         </div>
       </div>
 
-      <section className="mb-4 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+      <Card className="mb-4 p-4" muted>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-medium text-slate-100">Resumen del catalogo</p>
-            <p className="mt-1 text-xs text-slate-400">
+            <p className="text-sm font-medium text-text">Resumen del catalogo</p>
+            <p className="mt-1 text-xs text-muted">
               Usa el filtro para revisar que esta publicado y que sigue en borrador.
             </p>
           </div>
 
           <div className="flex flex-wrap gap-2 text-xs">
-            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-200">
+            <span className="rounded-full border border-border bg-surface px-3 py-1 text-text">
               Todos: {resumen.all}
             </span>
-            <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-emerald-200">
+            <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-emerald-700">
               Publicados: {resumen.published}
             </span>
-            <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-amber-200">
+            <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-amber-700">
               Borradores: {resumen.draft}
             </span>
           </div>
         </div>
-      </section>
+      </Card>
 
-      {loading && <p className="text-sm text-slate-300">Cargando productos…</p>}
+      {loading && <p className="text-sm text-muted">Cargando productos...</p>}
 
       {uiMessage && !loading && !errorMsg && (
-        <p className="mb-3 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
+        <p className="mb-3 rounded-md border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">
           {uiMessage}
         </p>
       )}
 
       {errorMsg && !loading && (
-        <p className="mb-3 rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
+        <p className="mb-3 rounded-md border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-sm text-rose-700">
           {errorMsg}
         </p>
       )}
 
       {!loading && !errorMsg && productos.length === 0 && (
-        <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-6 text-center">
-          <p className="text-base font-medium text-slate-100">
+        <Card className="p-6 text-center" muted>
+          <p className="text-base font-medium text-text">
             Todavia no tenes productos cargados.
           </p>
-          <p className="mt-2 text-sm text-slate-400">
+          <p className="mt-2 text-sm text-muted">
             Crea tu primer producto para empezar a armar el catalogo de la tienda.
           </p>
-          <Link
-            href="/panel/productos/nuevo"
-            className="mt-4 inline-flex rounded-lg bg-[#E30B13] px-4 py-2 text-sm font-medium text-white hover:bg-[#c70911]"
-          >
-            Crear primer producto
-          </Link>
-        </section>
+          <div className="mt-4">
+            <Link href="/panel/productos/nuevo">
+              <Button as="span" variant="primary">
+                Crear primer producto
+              </Button>
+            </Link>
+          </div>
+        </Card>
       )}
 
       {!loading && !errorMsg && productos.length > 0 && productosFiltrados.length === 0 && (
-        <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-6 text-center">
-          <p className="text-base font-medium text-slate-100">
+        <Card className="p-6 text-center" muted>
+          <p className="text-base font-medium text-text">
             No hay productos para este filtro.
           </p>
-          <p className="mt-2 text-sm text-slate-400">
+          <p className="mt-2 text-sm text-muted">
             Cambia el filtro para revisar el resto del catalogo.
           </p>
-        </section>
+        </Card>
       )}
 
       {!loading && productosFiltrados.length > 0 && (
-        <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-950/40">
+        <Card className="overflow-x-auto">
           <table className="min-w-full text-sm">
-            <thead className="bg-slate-900/60">
+            <thead className="bg-black/[0.03]">
               <tr>
-                <th className="px-4 py-2 text-left font-medium text-slate-300">
+                <th className="px-4 py-2 text-left font-medium text-muted">
                   Nombre
                 </th>
-                <th className="px-4 py-2 text-left font-medium text-slate-300">
+                <th className="px-4 py-2 text-left font-medium text-muted">
                   Precio
                 </th>
-                <th className="px-4 py-2 text-left font-medium text-slate-300">
+                <th className="px-4 py-2 text-left font-medium text-muted">
                   Stock
                 </th>
-                <th className="px-4 py-2 text-left font-medium text-slate-300">
+                <th className="px-4 py-2 text-left font-medium text-muted">
                   Estado
                 </th>
-                <th className="px-4 py-2 text-right font-medium text-slate-300">
+                <th className="px-4 py-2 text-right font-medium text-muted">
                   Acciones
                 </th>
               </tr>
@@ -335,36 +338,36 @@ const ProductosPage: React.FC = () => {
 
             <tbody>
               {productosFiltrados.map((p) => (
-                <tr key={p.id} className="border-t border-slate-800">
-                  <td className="px-4 py-2">
+                <tr key={p.id} className="border-t border-border">
+                  <td className="px-4 py-3 text-text">
                     {p.nombre}
                     {renderVariantesBadge(p.usaVariantes)}
                   </td>
 
-                  <td className="px-4 py-2">
+                  <td className="px-4 py-3 text-text">
                     {Number(p.precio).toLocaleString("es-UY", {
                       style: "currency",
                       currency: "UYU",
                     })}
                   </td>
 
-                  <td className="px-4 py-2">
+                  <td className="px-4 py-3">
                     <span
                       className={
-                        p.stockTotal <= 0 ? "text-rose-300" : "text-slate-200"
+                        p.stockTotal <= 0 ? "text-rose-700" : "text-text"
                       }
                     >
                       {p.stockTotal}
                     </span>
                   </td>
 
-                  <td className="px-4 py-2">{renderEstadoBadge(p.estado)}</td>
+                  <td className="px-4 py-3">{renderEstadoBadge(p.estado)}</td>
 
-                  <td className="px-4 py-2 text-right">
+                  <td className="px-4 py-3 text-right">
                     <div className="inline-flex items-center gap-3">
                       <Link
                         href={`/panel/productos/${p.id}`}
-                        className="text-xs font-medium text-emerald-400 hover:underline"
+                        className="text-xs font-medium text-primary hover:underline"
                       >
                         Editar
                       </Link>
@@ -375,11 +378,11 @@ const ProductosPage: React.FC = () => {
                         onClick={() => handleDelete(p.id)}
                         className={`text-xs font-medium ${
                           deletingId === p.id
-                            ? "cursor-not-allowed text-slate-500"
-                            : "text-rose-400 hover:underline"
+                            ? "cursor-not-allowed text-muted"
+                            : "text-rose-700 hover:underline"
                         }`}
                       >
-                        {deletingId === p.id ? "Eliminando…" : "Eliminar"}
+                        {deletingId === p.id ? "Eliminando..." : "Eliminar"}
                       </button>
                     </div>
                   </td>
@@ -387,7 +390,7 @@ const ProductosPage: React.FC = () => {
               ))}
             </tbody>
           </table>
-        </div>
+        </Card>
       )}
     </AdminLayout>
   );

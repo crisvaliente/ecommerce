@@ -12,36 +12,47 @@
 
 /* 2) CSS Variables globales */
 :root {
-  /* Colores base (del manual de marca) */
-  --rz-color-primary: #E30B13;   /* Rojo Raeyz – botones, acentos */
-  --rz-color-dark: #0D0D0E;      /* Negro casi absoluto – texto/fondos oscuros */
-  --rz-color-light: #EEECE1;     /* Arena clara – fondo principal del panel */
+  --color-bg: #e7e2d3;
+  --color-surface: #f8f5ec;
+  --color-dark: #0d0d0e;
+  --color-text: #0d0d0e;
+  --color-text-inverse: #fcfaf4;
+  --color-primary: #e30b13;
+  --color-border: rgba(13, 13, 14, 0.18);
+  --color-muted: rgba(13, 13, 14, 0.68);
 
-  /* Variaciones útiles */
-  --rz-color-border: rgba(13, 13, 14, 0.12);
-  --rz-color-muted: rgba(13, 13, 14, 0.6);
-  --rz-color-surface: #ffffff;   /* Cards, cajas elevadas */
-
-  /* Tipografías */
-  --rz-font-title: "Raleway", system-ui, -apple-system, BlinkMacSystemFont,
+  --font-title: "Raleway", system-ui, -apple-system, BlinkMacSystemFont,
     "Segoe UI", sans-serif;
-  --rz-font-body: "Inter", system-ui, -apple-system, BlinkMacSystemFont,
+  --font-body: "Inter", system-ui, -apple-system, BlinkMacSystemFont,
     "Segoe UI", sans-serif;
 
-  /* Radios y sombras */
-  --rz-radius-lg: 16px;
-  --rz-radius-md: 10px;
-  --rz-radius-sm: 6px;
+  --radius-lg: 16px;
+  --radius-md: 10px;
+  --radius-sm: 6px;
 
-  --rz-shadow-soft: 0 12px 30px rgba(0, 0, 0, 0.1);
+  --shadow-soft: 0 14px 34px rgba(13, 13, 14, 0.12);
+  --shadow-strong: 0 18px 44px rgba(13, 13, 14, 0.2);
 
-  /* Espaciado base (8px scale) */
   --rz-space-1: 4px;
   --rz-space-2: 8px;
   --rz-space-3: 12px;
   --rz-space-4: 16px;
   --rz-space-5: 24px;
   --rz-space-6: 32px;
+
+  /* Backward-compatible aliases */
+  --rz-color-primary: var(--color-primary);
+  --rz-color-dark: var(--color-dark);
+  --rz-color-light: var(--color-bg);
+  --rz-color-border: var(--color-border);
+  --rz-color-muted: var(--color-muted);
+  --rz-color-surface: var(--color-surface);
+  --rz-font-title: var(--font-title);
+  --rz-font-body: var(--font-body);
+  --rz-radius-lg: var(--radius-lg);
+  --rz-radius-md: var(--radius-md);
+  --rz-radius-sm: var(--radius-sm);
+  --rz-shadow-soft: var(--shadow-soft);
 }
 
 /* 3) Reseteo suave + base tipográfica */
@@ -50,9 +61,14 @@ html,
 body {
   padding: 0;
   margin: 0;
-  background-color: var(--rz-color-light);
-  color: var(--rz-color-dark);
-  font-family: var(--rz-font-body);
+  background-color: var(--color-bg);
+  background-image: radial-gradient(
+    circle at top,
+    rgba(227, 11, 19, 0.05),
+    transparent 28%
+  );
+  color: var(--color-text);
+  font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -65,7 +81,7 @@ body {
 /* Scroll minimal Raeyz */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--rz-color-primary) var(--rz-color-light);
+  scrollbar-color: var(--color-primary) var(--color-bg);
 }
 
 ::-webkit-scrollbar {
@@ -74,11 +90,11 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--rz-color-light);
+  background: var(--color-bg);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--rz-color-primary);
+  background: var(--color-primary);
 }
 
 /* Links */
@@ -95,29 +111,29 @@ h3,
 h4,
 h5,
 h6 {
-  font-family: var(--rz-font-title);
+  font-family: var(--font-title);
   margin: 0;
 }
 
 /* 5) Helper para contenedor del panel */
 .rz-admin-shell {
   min-height: 100vh;
-  background-color: var(--rz-color-light);
+  background-color: var(--color-bg);
 }
 
 /* 6) Clase base para cards */
 .rz-card {
-  background-color: var(--rz-color-surface);
-  border-radius: var(--rz-radius-md);
-  box-shadow: var(--rz-shadow-soft);
+  background-color: var(--color-surface);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-soft);
   padding: var(--rz-space-4);
-  border: 1px solid var(--rz-color-border);
+  border: 1px solid var(--color-border);
 }
 
 /* 7) Modo panel oscuro (por si lo usamos en alguna vista puntual) */
 .rz-panel-dark {
-  background-color: var(--rz-color-dark);
-  color: var(--rz-color-light);
+  background-color: var(--color-dark);
+  color: var(--color-text-inverse);
 }
 
 /* === Sidebar Raeyz – Panel Admin === */
@@ -183,13 +199,10 @@ h6 {
 }
 
 .rz-sidebar-link--active {
-  background: linear-gradient(
-    90deg,
-    var(--rz-color-primary),
-    #ff4040
-  );
+  background: linear-gradient(90deg, var(--rz-color-primary), #ff3b30);
   color: #ffffff;
   font-weight: 600;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 .rz-sidebar-footer {

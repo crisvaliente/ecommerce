@@ -9,13 +9,27 @@ export default {
   theme: {
     extend: {
       colors: {
-        background: "var(--background)",
-        foreground: "var(--foreground)",
-        primary: "var(--primary)",
+        background: "var(--color-bg)",
+        surface: "var(--color-surface)",
+        dark: "var(--color-dark)",
+        text: "var(--color-text)",
+        "text-inverse": "var(--color-text-inverse)",
+        primary: "var(--color-primary)",
+        border: "var(--color-border)",
+        muted: "var(--color-muted)",
       },
       fontFamily: {
-        raleway: ['Raleway', 'sans-serif'],
-        inter: ['Inter', 'sans-serif'],
+        raleway: ["var(--font-title)", "Raleway", "sans-serif"],
+        inter: ["var(--font-body)", "Inter", "sans-serif"],
+      },
+      borderRadius: {
+        sm: "var(--radius-sm)",
+        md: "var(--radius-md)",
+        lg: "var(--radius-lg)",
+      },
+      boxShadow: {
+        soft: "var(--shadow-soft)",
+        strong: "var(--shadow-strong)",
       },
     },
   },
