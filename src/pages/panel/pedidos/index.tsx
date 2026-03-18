@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import AdminLayout from "../../../components/layout/AdminLayout";
+import Button from "../../../components/ui/Button";
+import Card from "../../../components/ui/Card";
 import { supabase } from "../../../lib/supabaseClient";
 
 type PedidoEstado =
@@ -37,6 +39,22 @@ const estadoLabel: Record<PedidoEstado, string> = {
   entregado: "Entregado",
   cancelado: "Cancelado",
 };
+
+function getEstadoBadgeClass(pedido: PedidoPanelDTO): string {
+  if (pedido.bloqueado_por_stock || pedido.estado === "bloqueado") {
+    return "border-amber-500/20 bg-amber-500/10 text-amber-700";
+  }
+
+  switch (pedido.estado) {
+    case "pagado":
+    case "entregado":
+      return "border-emerald-500/20 bg-emerald-500/10 text-emerald-700";
+    case "cancelado":
+      return "border-rose-500/20 bg-rose-500/10 text-rose-700";
+    default:
+      return "border-border bg-black/[0.03] text-text";
+  }
+}
 
 function formatDate(value: string): string {
   const date = new Date(value);
@@ -109,53 +127,54 @@ const PanelPedidosPage: React.FC = () => {
     <AdminLayout>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Pedidos</h1>
-          <p className="text-sm text-slate-300">
+          <h1 className="font-raleway text-2xl font-semibold text-text">Pedidos</h1>
+          <p className="text-sm text-muted">
             Revisá los pedidos más recientes de tu empresa.
           </p>
         </div>
 
-        <button
-          type="button"
+        <Button
+          variant="secondary"
           onClick={fetchPedidos}
           disabled={loading}
-          className="rounded-lg bg-white/10 px-4 py-2 text-sm font-medium text-white hover:bg-white/15 disabled:opacity-60"
         >
-          {loading ? "Cargando…" : "Refrescar"}
-        </button>
+          {loading ? "Cargando..." : "Refrescar"}
+        </Button>
       </div>
 
-      {loading && <p className="text-sm text-slate-300">Cargando pedidos…</p>}
+      {loading && <p className="text-sm text-muted">Cargando pedidos...</p>}
 
       {errorMsg && !loading && (
-        <p className="mb-3 text-sm text-rose-400">{errorMsg}</p>
+        <p className="mb-3 rounded-md border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-sm text-rose-700">{errorMsg}</p>
       )}
 
       {!loading && !errorMsg && pedidos.length === 0 && (
-        <p className="text-sm text-slate-400">Todavía no hay pedidos.</p>
+        <Card className="p-6 text-center" muted>
+          <p className="text-sm text-muted">Todavia no hay pedidos.</p>
+        </Card>
       )}
 
       {!loading && pedidos.length > 0 && (
-        <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-950/40">
+        <Card className="overflow-x-auto">
           <table className="min-w-full text-sm">
-            <thead className="bg-slate-900/60">
+            <thead className="bg-black/[0.03]">
               <tr>
-                <th className="px-4 py-2 text-left font-medium text-slate-300">
+                <th className="px-4 py-3 text-left font-medium text-muted">
                   Pedido
                 </th>
-                <th className="px-4 py-2 text-left font-medium text-slate-300">
+                <th className="px-4 py-3 text-left font-medium text-muted">
                   Estado
                 </th>
-                <th className="px-4 py-2 text-left font-medium text-slate-300">
+                <th className="px-4 py-3 text-left font-medium text-muted">
                   Total
                 </th>
-                <th className="px-4 py-2 text-left font-medium text-slate-300">
+                <th className="px-4 py-3 text-left font-medium text-muted">
                   Creado
                 </th>
-                <th className="px-4 py-2 text-left font-medium text-slate-300">
+                <th className="px-4 py-3 text-left font-medium text-muted">
                   Expira
                 </th>
-                <th className="px-4 py-2 text-right font-medium text-slate-300">
+                <th className="px-4 py-3 text-right font-medium text-muted">
                   Acciones
                 </th>
               </tr>
@@ -163,42 +182,36 @@ const PanelPedidosPage: React.FC = () => {
 
             <tbody>
               {pedidos.map((pedido) => (
-                <tr key={pedido.pedido_id} className="border-t border-slate-800">
-                  <td className="px-4 py-2 font-mono text-xs text-slate-200">
+                <tr key={pedido.pedido_id} className="border-t border-border">
+                  <td className="px-4 py-3 font-mono text-xs text-text">
                     {pedido.pedido_id}
                   </td>
 
-                  <td className="px-4 py-2">
-                    <span
-                      className={
-                        pedido.bloqueado_por_stock
-                          ? "text-amber-300"
-                          : "text-slate-200"
-                      }
-                    >
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${getEstadoBadgeClass(pedido)}`}>
                       {estadoLabel[pedido.estado] ?? pedido.estado}
                     </span>
                   </td>
 
-                  <td className="px-4 py-2 text-slate-200">
+                  <td className="px-4 py-3 text-text">
                     {Number(pedido.total).toLocaleString("es-UY", {
                       style: "currency",
                       currency: "UYU",
                     })}
                   </td>
 
-                  <td className="px-4 py-2 text-slate-300">
+                  <td className="px-4 py-3 text-muted">
                     {formatDate(pedido.creado_en)}
                   </td>
 
-                  <td className="px-4 py-2 text-slate-300">
+                  <td className="px-4 py-3 text-muted">
                     {formatDate(pedido.expira_en)}
                   </td>
 
-                  <td className="px-4 py-2 text-right">
+                  <td className="px-4 py-3 text-right">
                     <Link
                       href={`/panel/pedidos/${pedido.pedido_id}`}
-                      className="text-xs font-medium text-emerald-400 hover:underline"
+                      className="text-xs font-medium text-primary hover:underline"
                     >
                       Ver detalle
                     </Link>
@@ -207,7 +220,7 @@ const PanelPedidosPage: React.FC = () => {
               ))}
             </tbody>
           </table>
-        </div>
+        </Card>
       )}
     </AdminLayout>
   );

@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import AdminLayout from "../../../components/layout/AdminLayout";
+import Button from "../../../components/ui/Button";
+import Card from "../../../components/ui/Card";
 import { supabase } from "../../../lib/supabaseClient";
 
 type PedidoEstado =
@@ -145,13 +147,13 @@ function getIntentoStatusTone(intento: IntentoPago | null): string {
 
   switch (intento.estado) {
     case "aprobado":
-      return "text-emerald-300";
+      return "text-emerald-700";
     case "rechazado":
     case "cancelado":
     case "expirado":
-      return "text-rose-300";
+      return "text-rose-700";
     default:
-      return "text-amber-300";
+      return "text-amber-700";
   }
 }
 
@@ -233,32 +235,31 @@ const PanelPedidoDetailPage: React.FC = () => {
         <div>
           <Link
             href="/panel/pedidos"
-            className="text-sm font-medium text-emerald-400 hover:underline"
+            className="text-sm font-medium text-primary hover:underline"
           >
             Volver a pedidos
           </Link>
-          <h1 className="mt-2 text-2xl font-semibold">Pedido</h1>
+          <h1 className="mt-2 font-raleway text-2xl font-semibold text-text">Pedido</h1>
           {pedidoId && (
-            <p className="mt-1 text-sm text-slate-400">
+            <p className="mt-1 text-sm text-muted">
               Seguimiento completo del pedido y su estado de cobro.
             </p>
           )}
         </div>
 
-        <button
-          type="button"
+        <Button
+          variant="secondary"
           onClick={fetchPedido}
           disabled={loading || !pedidoId}
-          className="rounded-lg bg-white/10 px-4 py-2 text-sm font-medium text-white hover:bg-white/15 disabled:opacity-60"
         >
-          {loading ? "Cargando…" : "Refrescar"}
-        </button>
+          {loading ? "Cargando..." : "Refrescar"}
+        </Button>
       </div>
 
-      {loading && <p className="text-sm text-slate-300">Cargando detalle…</p>}
+      {loading && <p className="text-sm text-muted">Cargando detalle...</p>}
 
       {errorMsg && !loading && (
-        <p className="mb-4 text-sm text-rose-400">{errorMsg}</p>
+        <p className="mb-4 rounded-md border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-sm text-rose-700">{errorMsg}</p>
       )}
 
       {!loading && pedido && (
@@ -270,17 +271,17 @@ const PanelPedidoDetailPage: React.FC = () => {
             </section>
           )}
 
-          <section className="grid grid-cols-1 gap-4 rounded-xl border border-slate-800 bg-slate-950/40 p-4 md:grid-cols-2 xl:grid-cols-3">
+          <Card className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2 xl:grid-cols-3">
             <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500">Estado</p>
-              <p className="mt-1 text-sm text-slate-100">
+              <p className="text-xs uppercase tracking-wide text-muted">Estado</p>
+              <p className="mt-1 text-sm text-text">
                 {estadoLabel[pedido.estado] ?? pedido.estado}
               </p>
             </div>
 
             <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500">Total</p>
-              <p className="mt-1 text-sm text-slate-100">
+              <p className="text-xs uppercase tracking-wide text-muted">Total</p>
+              <p className="mt-1 text-sm text-text">
                 {pedido.total.toLocaleString("es-UY", {
                   style: "currency",
                   currency: "UYU",
@@ -289,49 +290,49 @@ const PanelPedidoDetailPage: React.FC = () => {
             </div>
 
             <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500">Revision de stock</p>
-              <p className="mt-1 text-sm text-slate-100">
+              <p className="text-xs uppercase tracking-wide text-muted">Revision de stock</p>
+              <p className="mt-1 text-sm text-text">
                 {pedido.bloqueado_por_stock ? "Requiere atencion" : "Sin observaciones"}
               </p>
             </div>
 
             <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500">Creado</p>
-              <p className="mt-1 text-sm text-slate-100">{formatDate(pedido.creado_en)}</p>
+              <p className="text-xs uppercase tracking-wide text-muted">Creado</p>
+              <p className="mt-1 text-sm text-text">{formatDate(pedido.creado_en)}</p>
             </div>
 
             <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500">Expira</p>
-              <p className="mt-1 text-sm text-slate-100">{formatDate(pedido.expira_en)}</p>
+              <p className="text-xs uppercase tracking-wide text-muted">Expira</p>
+              <p className="mt-1 text-sm text-text">{formatDate(pedido.expira_en)}</p>
             </div>
 
             <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500">Actualizado</p>
-              <p className="mt-1 text-sm text-slate-100">{formatDate(pedido.actualizado_en)}</p>
+              <p className="text-xs uppercase tracking-wide text-muted">Actualizado</p>
+              <p className="mt-1 text-sm text-text">{formatDate(pedido.actualizado_en)}</p>
             </div>
-          </section>
+          </Card>
 
-          <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
-            <h2 className="text-lg font-medium text-slate-100">Entrega</h2>
-            <p className="mt-3 text-sm text-slate-300">
+          <Card className="p-4">
+            <h2 className="text-lg font-medium text-text">Entrega</h2>
+            <p className="mt-3 text-sm text-muted">
               {renderSnapshot(pedido.direccion_envio_snapshot)}
             </p>
-          </section>
+          </Card>
 
-          <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+          <Card className="p-4">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <h2 className="text-lg font-medium text-slate-100">Cobro</h2>
+              <h2 className="text-lg font-medium text-text">Cobro</h2>
             </div>
 
             {!pedido.intento_pago ? (
-              <p className="text-sm text-slate-400">
+              <p className="text-sm text-muted">
                 Todavia no hay un intento de pago asociado a este pedido.
               </p>
             ) : (
               <div className="space-y-5">
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
                   <div>
-                    <p className="text-xs uppercase tracking-wide text-slate-500">
+                    <p className="text-xs uppercase tracking-wide text-muted">
                       Estado del cobro
                     </p>
                     <p className={`mt-1 text-sm font-medium ${getIntentoStatusTone(pedido.intento_pago)}`}>
@@ -339,83 +340,83 @@ const PanelPedidoDetailPage: React.FC = () => {
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Canal</p>
-                    <p className="mt-1 text-sm text-slate-100">{pedido.intento_pago.canal_pago}</p>
+                    <p className="text-xs uppercase tracking-wide text-muted">Canal</p>
+                    <p className="mt-1 text-sm text-text">{pedido.intento_pago.canal_pago}</p>
                   </div>
                   <div>
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Creado</p>
-                    <p className="mt-1 text-sm text-slate-100">
+                    <p className="text-xs uppercase tracking-wide text-muted">Creado</p>
+                    <p className="mt-1 text-sm text-text">
                       {formatDate(pedido.intento_pago.creado_en)}
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Actualizado</p>
-                    <p className="mt-1 text-sm text-slate-100">
+                    <p className="text-xs uppercase tracking-wide text-muted">Actualizado</p>
+                    <p className="mt-1 text-sm text-text">
                       {formatDate(pedido.intento_pago.actualizado_en)}
                     </p>
                   </div>
                 </div>
 
-                <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
-                  <h3 className="text-sm font-medium text-slate-100">Datos tecnicos</h3>
+                <Card className="p-4" muted>
+                  <h3 className="text-sm font-medium text-text">Datos tecnicos</h3>
                   <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                     <div>
-                      <p className="text-xs uppercase tracking-wide text-slate-500">Intento ID</p>
-                      <p className="mt-1 break-all font-mono text-xs text-slate-100">
+                      <p className="text-xs uppercase tracking-wide text-muted">Intento ID</p>
+                      <p className="mt-1 break-all font-mono text-xs text-text">
                         {pedido.intento_pago.id}
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs uppercase tracking-wide text-slate-500">Preference ID</p>
-                      <p className="mt-1 break-all font-mono text-xs text-slate-100">
+                      <p className="text-xs uppercase tracking-wide text-muted">Preference ID</p>
+                      <p className="mt-1 break-all font-mono text-xs text-text">
                         {pedido.intento_pago.preference_id ?? "-"}
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs uppercase tracking-wide text-slate-500">External ID</p>
-                      <p className="mt-1 break-all font-mono text-xs text-slate-100">
+                      <p className="text-xs uppercase tracking-wide text-muted">External ID</p>
+                      <p className="mt-1 break-all font-mono text-xs text-text">
                         {pedido.intento_pago.external_id ?? "-"}
                       </p>
                     </div>
                   </div>
-                </div>
+                </Card>
               </div>
             )}
-          </section>
+          </Card>
 
-          <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
-            <h2 className="mb-3 text-lg font-medium text-slate-100">Items</h2>
+          <Card className="p-4">
+            <h2 className="mb-3 text-lg font-medium text-text">Items</h2>
 
             {pedido.items.length === 0 ? (
-              <p className="text-sm text-slate-400">Este pedido no tiene items.</p>
+              <p className="text-sm text-muted">Este pedido no tiene items.</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="min-w-full text-sm">
-                  <thead className="bg-slate-900/60">
+                  <thead className="bg-black/[0.03]">
                     <tr>
-                      <th className="px-4 py-2 text-left font-medium text-slate-300">Producto</th>
-                      <th className="px-4 py-2 text-left font-medium text-slate-300">Talle</th>
-                      <th className="px-4 py-2 text-left font-medium text-slate-300">Cantidad</th>
-                      <th className="px-4 py-2 text-left font-medium text-slate-300">Precio</th>
-                      <th className="px-4 py-2 text-left font-medium text-slate-300">Subtotal</th>
+                      <th className="px-4 py-2 text-left font-medium text-muted">Producto</th>
+                      <th className="px-4 py-2 text-left font-medium text-muted">Talle</th>
+                      <th className="px-4 py-2 text-left font-medium text-muted">Cantidad</th>
+                      <th className="px-4 py-2 text-left font-medium text-muted">Precio</th>
+                      <th className="px-4 py-2 text-left font-medium text-muted">Subtotal</th>
                     </tr>
                   </thead>
                   <tbody>
                     {pedido.items.map((item, index) => (
                       <tr
                         key={`${item.producto_id ?? "item"}-${index}`}
-                        className="border-t border-slate-800"
+                        className="border-t border-border"
                       >
-                        <td className="px-4 py-2 text-slate-200">{item.nombre_producto}</td>
-                        <td className="px-4 py-2 text-slate-300">{item.talle ?? "-"}</td>
-                        <td className="px-4 py-2 text-slate-300">{item.cantidad}</td>
-                        <td className="px-4 py-2 text-slate-300">
+                        <td className="px-4 py-2 text-text">{item.nombre_producto}</td>
+                        <td className="px-4 py-2 text-muted">{item.talle ?? "-"}</td>
+                        <td className="px-4 py-2 text-muted">{item.cantidad}</td>
+                        <td className="px-4 py-2 text-muted">
                           {item.precio_unitario.toLocaleString("es-UY", {
                             style: "currency",
                             currency: "UYU",
                           })}
                         </td>
-                        <td className="px-4 py-2 text-slate-100">
+                        <td className="px-4 py-2 text-text">
                           {item.subtotal.toLocaleString("es-UY", {
                             style: "currency",
                             currency: "UYU",
@@ -427,7 +428,7 @@ const PanelPedidoDetailPage: React.FC = () => {
                 </table>
               </div>
             )}
-          </section>
+          </Card>
         </div>
       )}
     </AdminLayout>

@@ -1,6 +1,8 @@
 import React from "react";
 import { useRouter } from "next/router";
 import AdminLayout from "../../../components/layout/AdminLayout";
+import Button from "../../../components/ui/Button";
+import Card from "../../../components/ui/Card";
 import { useAuth } from "../../../context/AuthContext";
 import ProductForm from "./ProductForm";
 
@@ -26,20 +28,17 @@ const EditarProductoPage: React.FC = () => {
     <AdminLayout>
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Editar producto</h1>
-          <p className="text-sm text-slate-300">Actualizá los datos del producto.</p>
+          <h1 className="font-raleway text-2xl font-semibold text-text">Editar producto</h1>
+          <p className="text-sm text-muted">Actualiza los datos del producto.</p>
         </div>
 
-        <button
-          onClick={goBackToList}
-          className="rounded-lg border border-slate-600 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800"
-        >
+        <Button variant="secondary" onClick={goBackToList}>
           Volver al listado
-        </button>
+        </Button>
       </div>
 
       {!hasEmpresa && (
-        <p className="mb-4 text-sm text-rose-400">
+        <p className="mb-4 rounded-md border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-sm text-rose-700">
           No se encontró una empresa asociada a tu usuario. Volvé al inicio y seleccioná una
           empresa válida.
         </p>
@@ -47,9 +46,9 @@ const EditarProductoPage: React.FC = () => {
 
       {/* ProductForm se encarga de cargar el producto, manejar estado y guardar */}
       {hasEmpresa && (
-        <div className="max-w-3xl rounded-xl border border-slate-800 bg-slate-950/40">
+        <Card className="max-w-3xl">
           <ProductForm productoId={id} />
-        </div>
+        </Card>
       )}
     </AdminLayout>
   );
