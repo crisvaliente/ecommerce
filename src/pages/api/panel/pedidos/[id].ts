@@ -137,7 +137,7 @@ export default async function handler(
       return res.status(403).json({ error: "forbidden" });
     }
 
-    if (!perfil.rol || !["admin", "desarrollador"].includes(perfil.rol)) {
+    if (!perfil.rol || !["admin", "staff"].includes(perfil.rol)) {
       return res.status(403).json({ error: "forbidden" });
     }
 

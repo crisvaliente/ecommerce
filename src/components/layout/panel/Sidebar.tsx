@@ -13,22 +13,22 @@ const links: PanelLink[] = [
   {
     href: "/panel",
     label: "Inicio",
-    allowedRoles: ["admin", "desarrollador"],
+    allowedRoles: ["admin", "staff"],
   },
   {
     href: "/panel/productos",
     label: "Productos",
-    allowedRoles: ["admin", "desarrollador"],
+    allowedRoles: ["admin", "staff"],
   },
   {
     href: "/panel/categorias",
     label: "Categorías",
-    allowedRoles: ["admin", "desarrollador"],
+    allowedRoles: ["admin", "staff"],
   },
   {
     href: "/panel/pedidos",
     label: "Pedidos",
-    allowedRoles: ["admin", "desarrollador"],
+    allowedRoles: ["admin", "staff"],
   },
   {
     href: "/panel/payments",
@@ -41,7 +41,7 @@ const PanelSidebar: React.FC = () => {
   const router = useRouter();
   const { dbUser, sessionUser } = useAuth();
 
-  const role = dbUser?.rol ?? "invitado";
+  const role = dbUser?.rol ?? "cliente";
 
   const visibleLinks = links.filter(
     (link) => !link.allowedRoles || link.allowedRoles.includes(role)

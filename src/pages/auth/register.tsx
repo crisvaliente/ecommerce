@@ -3,6 +3,11 @@ import React, { useState } from "react";
 import { useRouter } from "next/router";
 import { supabase } from "../../lib/supabaseClient";
 
+type Feedback = {
+  kind: "success" | "info" | "error";
+  text: string;
+};
+
 const getErrorMessage = (err: unknown): string => {
   if (err instanceof Error) return err.message;
   if (typeof err === "string") return err;
@@ -19,8 +24,7 @@ export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<Feedback | null>(null);
 
   const normalize = (m: string) => {
     if (/already registered|duplicate/i.test(m)) return "Ya existe una cuenta con ese correo.";
@@ -31,8 +35,7 @@ export default function RegisterPage() {
 
   const handleRegister = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault(); // evita refresh
-    setErr(null);
-    setMsg(null);
+    setFeedback(null);
     setLoading(true);
 
     try {
@@ -50,15 +53,22 @@ export default function RegisterPage() {
 
       if (error) throw error;
 
-      const needsVerify = !data.user?.email_confirmed_at;
-      if (needsVerify) {
-        setMsg("Te enviamos un correo de verificación. Revisá tu bandeja (y Spam).");
-      } else {
-        setMsg("Cuenta creada correctamente. Redirigiendo…");
+      if (data.session) {
+        setFeedback({
+          kind: "success",
+          text: "Cuenta creada correctamente. Redirigiendo...",
+        });
         setTimeout(() => router.push("/auth/login"), 900);
+      } else if (data.user) {
+        setFeedback({
+          kind: "info",
+          text: "Te enviamos un correo de verificación. Revisá tu bandeja (y Spam).",
+        });
+      } else {
+        throw new Error("No pudimos confirmar la creación de tu cuenta.");
       }
     } catch (e: unknown) {
-      setErr(normalize(getErrorMessage(e)));
+      setFeedback({ kind: "error", text: normalize(getErrorMessage(e)) });
       console.error("signup error:", e);
     } finally {
       setLoading(false);
@@ -66,26 +76,24 @@ export default function RegisterPage() {
   };
 
   const resendVerification = async () => {
-    setErr(null);
-    setMsg(null);
+    setFeedback(null);
     const { error } = await supabase.auth.resend({
       type: "signup",
       email: email.trim().toLowerCase(),
     });
-    if (error) setErr("No pudimos reenviar el correo.");
-    else setMsg("Correo de verificación reenviado.");
+    if (error) setFeedback({ kind: "error", text: "No pudimos reenviar el correo." });
+    else setFeedback({ kind: "info", text: "Correo de verificación reenviado." });
   };
 
   const handleGoogleRegister = async () => {
-    setErr(null);
-    setMsg(null);
+    setFeedback(null);
     const origin =
       typeof window !== "undefined" ? window.location.origin : undefined;
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo: origin ? `${origin}/auth/callback` : undefined },
     });
-    if (error) setErr(error.message);
+    if (error) setFeedback({ kind: "error", text: error.message });
   };
 
   // Handlers tipados de inputs (evitan any implícito)
@@ -97,8 +105,19 @@ export default function RegisterPage() {
     <div className="max-w-md mx-auto mt-10 p-6 border rounded shadow bg-white/80">
       <h1 className="text-2xl mb-4">Registrarse</h1>
 
-      {msg && <p className="mb-4 p-3 rounded bg-green-100 text-green-800">{msg}</p>}
-      {err && <p className="mb-4 p-3 rounded bg-red-100 text-red-800">{err}</p>}
+      {feedback && (
+        <p
+          className={`mb-4 p-3 rounded ${
+            feedback.kind === "success"
+              ? "bg-green-100 text-green-800"
+              : feedback.kind === "info"
+                ? "bg-blue-100 text-blue-800"
+                : "bg-red-100 text-red-800"
+          }`}
+        >
+          {feedback.text}
+        </p>
+      )}
 
       <form onSubmit={handleRegister} className="flex flex-col space-y-4">
         <input

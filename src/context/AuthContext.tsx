@@ -17,7 +17,7 @@ export interface CustomUser {
   supabase_uid: string;     // auth.users.id
   nombre: string | null;
   correo: string | null;
-  rol: "admin" | "desarrollador" | "usuario" | "invitado" | string;
+  rol: "admin" | "staff" | "cliente";
   empresa_id: string | null;
 }
 
@@ -87,8 +87,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         .insert({
           supabase_uid: u.id,
           correo: emailLower,
-          nombre: fullName, // ⬅️ ahora guardamos el nombre real
-          rol: "invitado",
+          nombre: fullName,
+          rol: "cliente",
+          onboarding: true,
           empresa_id: null,
         })
         .select("id, supabase_uid, nombre, correo, rol, empresa_id")
@@ -96,7 +97,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       if (insErr) {
         console.debug("[auth] ensureProfile insert error:", insErr);
-        return null;
+        const { data: fallback } = await supabase
+          .from("usuario")
+          .select("id, supabase_uid, nombre, correo, rol, empresa_id")
+          .eq("supabase_uid", u.id)
+          .maybeSingle();
+        return (fallback as CustomUser) ?? null;
       }
       return inserted as CustomUser;
     },

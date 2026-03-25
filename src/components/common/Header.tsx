@@ -116,15 +116,15 @@ const Header: React.FC = () => {
               <NavLink href="/contacto">Contacto</NavLink>
             </li>
 
-            {/* Acceso al panel solo para admin/dueña */}
-            {(dbUser?.rol === 'admin' || dbUser?.rol === 'dueña') && (
+            {/* Acceso al panel solo para admin/staff */}
+            {(dbUser?.rol === 'admin' || dbUser?.rol === 'staff') && (
               <li>
                 <NavLink href="/panel">Panel</NavLink>
               </li>
             )}
 
-            {/* Extra para usuarios logueados con rol "usuario" */}
-            {dbUser?.rol === 'usuario' && (
+            {/* Extra para usuarios logueados con rol cliente */}
+            {dbUser?.rol === 'cliente' && (
               <>
                 <li>
                   <NavLink href="/coleccion">Catálogo</NavLink>

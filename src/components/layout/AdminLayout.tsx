@@ -9,7 +9,7 @@ interface AdminLayoutProps {
   children: ReactNode;
 }
 
-const allowedRoles = ["admin", "desarrollador"];
+const allowedRoles = ["admin", "staff"];
 
 type InterstitialProps = {
   title: string;
