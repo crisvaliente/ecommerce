@@ -16,6 +16,15 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Supabase local
+
+This repo has a local Supabase config in `supabase/config.toml`.
+
+- For local development, `NEXT_PUBLIC_SUPABASE_URL` should point to `http://127.0.0.1:55491`.
+- The anon and service role keys must come from your local Supabase stack, not from the hosted project.
+- The current `.env.local` in this workspace still points to the hosted project, so update it before testing the local auth flow.
+- Local email confirmation is disabled (`auth.email.enable_confirmations = false`), so sign-up should create an active session right away.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
