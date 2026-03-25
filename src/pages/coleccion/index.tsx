@@ -323,6 +323,18 @@ const ColeccionPage: React.FC<
     setIntentoResult(null);
 
     try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      const accessToken = session?.access_token ?? null;
+
+      if (sessionError || !accessToken) {
+        setCheckoutError(getCheckoutErrorMessage("unauthorized"));
+        return;
+      }
+
       const addressAvailable = await ensureUserHasAddress();
 
       if (!addressAvailable) {
@@ -334,9 +346,9 @@ const ColeccionPage: React.FC<
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
-          usuario_id: dbUser.id,
           empresa_id: empresaId,
           items: [
             {
@@ -353,18 +365,6 @@ const ColeccionPage: React.FC<
 
       if (!pedidoResponse.ok || !pedidoBody?.pedido_id) {
         setCheckoutError(getCheckoutErrorMessage(pedidoBody?.error ?? null));
-        return;
-      }
-
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.getSession();
-
-      const accessToken = session?.access_token ?? null;
-
-      if (sessionError || !accessToken) {
-        setCheckoutError(getCheckoutErrorMessage("unauthorized"));
         return;
       }
 
