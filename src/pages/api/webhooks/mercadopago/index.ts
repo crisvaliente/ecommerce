@@ -121,7 +121,22 @@ function buildWebhookManifest(params: {
   return `id:${params.dataId};request-id:${params.xRequestId};ts:${params.ts};`;
 }
 
-function validateMpWebhookSignature(req: NextApiRequest): boolean {
+function resolveWebhookPaymentId(
+  req: NextApiRequest,
+  body?: MpWebhookBody
+): string | null {
+  return (
+    getSingleQueryValue(req.query["data.id"]) ??
+    (body?.data?.id != null ? String(body.data.id) : null) ??
+    getSingleQueryValue(req.query.id) ??
+    null
+  );
+}
+
+function validateMpWebhookSignature(
+  req: NextApiRequest,
+  paymentId: string | null
+): boolean {
   if (!MP_WEBHOOK_SECRET) return false;
 
   const xSignature = req.headers["x-signature"];
@@ -134,17 +149,12 @@ function validateMpWebhookSignature(req: NextApiRequest): boolean {
 
   const { ts, v1 } = parseHeaderSignature(xSignatureValue);
 
-  const dataIdFromQuery =
-    getSingleQueryValue(req.query["data.id"]) ??
-    getSingleQueryValue(req.query.id) ??
-    null;
-
-  if (!ts || !v1 || !xRequestIdValue || !dataIdFromQuery) {
+  if (!ts || !v1 || !xRequestIdValue || !paymentId) {
     return false;
   }
 
   const manifest = buildWebhookManifest({
-    dataId: dataIdFromQuery,
+    dataId: paymentId,
     xRequestId: xRequestIdValue,
     ts,
   });
@@ -155,6 +165,19 @@ function validateMpWebhookSignature(req: NextApiRequest): boolean {
     .digest("hex");
 
   return safeCompareHex(calculated, v1);
+}
+
+function isRpcSemanticSuccess(rpcRow: RpcRow | null): boolean {
+  if (!rpcRow?.ok) return false;
+
+  switch (rpcRow.codigo_resultado) {
+    case "sin_cambios_idempotente":
+    case "intento_actualizado":
+    case "intento_aprobado_y_consolidado":
+      return true;
+    default:
+      return false;
+  }
 }
 
 function getTraceId(req: NextApiRequest): string {
@@ -245,6 +268,7 @@ export default async function handler(
   }
 
   const body = (req.body ?? {}) as MpWebhookBody;
+  const paymentId = resolveWebhookPaymentId(req, body);
 
   const eventType =
     body.type ??
@@ -276,7 +300,7 @@ export default async function handler(
   }
 
   const devBypass = isDevBypassEnabled(req);
-  const signatureOk = devBypass ? true : validateMpWebhookSignature(req);
+  const signatureOk = devBypass ? true : validateMpWebhookSignature(req, paymentId);
 
   console.log("[mp-webhook] signature", {
     traceId,
@@ -287,10 +311,6 @@ export default async function handler(
   if (!signatureOk) {
     return res.status(401).json({ error: "invalid_webhook_signature" });
   }
-
-  const paymentId =
-    getSingleQueryValue(req.query["data.id"]) ??
-    (body.data?.id != null ? String(body.data.id) : null);
 
   console.log("[mp-webhook] payment_id", {
     traceId,
@@ -335,20 +355,20 @@ export default async function handler(
           externalReference: mpPayment.external_reference ?? null,
         });
       } catch (err) {
-        console.warn("[mp-webhook] payment lookup failed", {
+        const detail = err instanceof Error ? err.message : "unknown_error";
+
+        console.error("[mp-webhook] payment lookup failed", {
           traceId,
           paymentId,
           eventType,
           action: body.action ?? null,
           reason: "payment_lookup_failed",
-          detail: err instanceof Error ? err.message : "unknown_error",
+          detail,
         });
 
-        return res.status(200).json({
-          ok: true,
-          absorbed: true,
-          reason: "payment_lookup_failed",
-          paymentId,
+        return res.status(502).json({
+          error: "payment_lookup_failed",
+          detail,
         });
       }
     }
@@ -476,6 +496,42 @@ export default async function handler(
       return res.status(500).json({
         error: "rpc_failed",
         detail: rpcErr.message,
+      });
+    }
+
+    if (!rpcRow) {
+      console.error("[mp-webhook] rpc semantic failure", {
+        traceId,
+        intentoPagoId: externalReference,
+        paymentId: externalId,
+        reason: "rpc_without_result",
+      });
+
+      return res.status(500).json({
+        error: "rpc_without_result",
+      });
+    }
+
+    if (!isRpcSemanticSuccess(rpcRow)) {
+      console.error("[mp-webhook] rpc semantic failure", {
+        traceId,
+        intentoPagoId: externalReference,
+        paymentId: externalId,
+        codigoResultado: rpcRow.codigo_resultado,
+        rpcOk: rpcRow.ok,
+        consolidacionOk: rpcRow.consolidacion_ok,
+      });
+
+      if (rpcRow.codigo_resultado === "intento_aprobado_sin_consolidar") {
+        return res.status(503).json({
+          error: "rpc_semantic_failure",
+          detail: rpcRow.codigo_resultado,
+        });
+      }
+
+      return res.status(409).json({
+        error: "rpc_semantic_failure",
+        detail: rpcRow.codigo_resultado,
       });
     }
 
