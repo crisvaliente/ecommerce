@@ -30,6 +30,19 @@ type StockResumenRow = {
   usa_variantes: boolean;
 };
 
+type ProductoVarianteRow = {
+  id: string;
+  producto_id: string;
+  talle: string;
+  stock: number;
+};
+
+type ProductoVarianteStorefront = {
+  variante_id: string;
+  talle: string;
+  stock: number;
+};
+
 type ImagenProductoRow = {
   producto_id: string;
   path: string | null;
@@ -45,6 +58,7 @@ type ProductoStorefront = {
   precio: number;
   stock_efectivo: number;
   usa_variantes: boolean;
+  variantes: ProductoVarianteStorefront[];
   imagen_url: string | null;
 };
 
@@ -165,6 +179,32 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (
   );
 
   const productoIds = (productosData ?? []).map((producto) => producto.id);
+
+  const { data: variantesData } = productoIds.length > 0
+    ? await supabaseServer
+        .from("producto_variante")
+        .select("id, producto_id, talle, stock")
+        .in("producto_id", productoIds)
+        .eq("activo", true)
+        .order("talle", { ascending: true })
+        .returns<ProductoVarianteRow[]>()
+    : { data: [] as ProductoVarianteRow[] };
+
+  const variantesMap = new Map<string, ProductoVarianteStorefront[]>();
+
+  (variantesData ?? []).forEach((variante) => {
+    if (!(variante.stock > 0)) {
+      return;
+    }
+
+    const current = variantesMap.get(variante.producto_id) ?? [];
+    current.push({
+      variante_id: variante.id,
+      talle: variante.talle,
+      stock: variante.stock,
+    });
+    variantesMap.set(variante.producto_id, current);
+  });
   let imageMap = new Map<string, string>();
 
   if (productoIds.length > 0) {
@@ -222,20 +262,24 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (
     .map((p) => {
       const resumen = resumenMap.get(p.id);
       const stockBase = typeof p.stock === "number" ? p.stock : 0;
+      const variantes = variantesMap.get(p.id) ?? [];
 
       return {
         producto_id: p.id,
         nombre: p.nombre,
         descripcion: p.descripcion,
         precio: Number(p.precio),
-        stock_efectivo:
-          typeof resumen?.stock_total === "number" ? resumen.stock_total : stockBase,
+        stock_efectivo: resumen?.usa_variantes
+          ? variantes.reduce((total, variante) => total + variante.stock, 0)
+          : typeof resumen?.stock_total === "number"
+            ? resumen.stock_total
+            : stockBase,
         usa_variantes:
           typeof resumen?.usa_variantes === "boolean" ? resumen.usa_variantes : false,
+        variantes,
         imagen_url: imageMap.get(p.id) ?? null,
       };
-    })
-    .filter((producto) => !producto.usa_variantes);
+    });
 
   return {
     props: {
@@ -253,6 +297,9 @@ const ColeccionPage: React.FC<
   const { sessionUser, dbUser } = useAuth();
   const [creatingFor, setCreatingFor] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [selectedVarianteByProducto, setSelectedVarianteByProducto] = useState<
+    Record<string, string>
+  >({});
   const [hasAddress, setHasAddress] = useState<boolean | null>(null);
   const [intentoResult, setIntentoResult] = useState<{
     id: string;
@@ -307,7 +354,10 @@ const ColeccionPage: React.FC<
     return available;
   };
 
-  const handleComprar = async (producto: ProductoStorefront) => {
+  const handleComprar = async (
+    producto: ProductoStorefront,
+    varianteId?: string | null
+  ) => {
     if (!canCreatePedido || !dbUser?.id || !empresaId) {
       setCheckoutError("Necesitás iniciar sesión para continuar con la compra.");
       return;
@@ -316,6 +366,20 @@ const ColeccionPage: React.FC<
     if (producto.precio <= 0) {
       setCheckoutError("Este producto no esta disponible para compra en este momento.");
       return;
+    }
+
+    if (producto.usa_variantes && !varianteId) {
+      setCheckoutError("Elegí un talle disponible para continuar con la compra.");
+      return;
+    }
+
+    if (producto.usa_variantes && varianteId) {
+      const varianteValida = producto.variantes.some((variante) => variante.variante_id === varianteId);
+
+      if (!varianteValida) {
+        setCheckoutError("Elegí un talle disponible para continuar con la compra.");
+        return;
+      }
     }
 
     setCreatingFor(producto.producto_id);
@@ -353,6 +417,7 @@ const ColeccionPage: React.FC<
           items: [
             {
               producto_id: producto.producto_id,
+              variante_id: producto.usa_variantes ? varianteId : undefined,
               cantidad: 1,
             },
           ],
@@ -534,42 +599,91 @@ const ColeccionPage: React.FC<
         {productos.length > 0 && (
           <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
             {productos.map((producto) => (
-              <ProductCard
-                key={producto.producto_id}
-                nombre={producto.nombre}
-                descripcion={producto.descripcion}
-                precio={producto.precio}
-                stockLabel={formatStockLabel(producto.stock_efectivo)}
-                disponible={producto.stock_efectivo > 0}
-                canBuy={producto.stock_efectivo > 0 && producto.precio > 0}
-                imageUrl={producto.imagen_url}
-                imageAlt={producto.nombre}
-                helperText={
-                  producto.precio <= 0
-                    ? "Este producto no esta disponible para compra en este momento."
-                    : producto.stock_efectivo <= 0
-                    ? "Este producto volvera a estar disponible cuando repongamos stock."
-                    : canCreatePedido
-                      ? "Vas a completar el pago en Mercado Pago, sin pasos intermedios."
-                      : "Inicia sesion para continuar con una compra segura."
-                }
-                action={
-                  canCreatePedido ? {
-                    label:
-                      creatingFor === producto.producto_id
-                        ? "Preparando tu pago..."
-                        : "Comprar ahora",
-                    onClick: () => handleComprar(producto),
-                    disabled:
-                      producto.precio <= 0 ||
-                      producto.stock_efectivo <= 0 ||
-                      creatingFor === producto.producto_id,
-                  } : {
-                    label: "Iniciar sesion para comprar",
-                    href: "/auth/login",
+              <div key={producto.producto_id} className="space-y-3">
+                <ProductCard
+                  nombre={producto.nombre}
+                  descripcion={producto.descripcion}
+                  precio={producto.precio}
+                  stockLabel={formatStockLabel(producto.stock_efectivo)}
+                  disponible={producto.stock_efectivo > 0}
+                  canBuy={producto.stock_efectivo > 0 && producto.precio > 0}
+                  imageUrl={producto.imagen_url}
+                  imageAlt={producto.nombre}
+                  helperText={
+                    producto.precio <= 0
+                      ? "Este producto no esta disponible para compra en este momento."
+                      : producto.stock_efectivo <= 0
+                      ? "Este producto volvera a estar disponible cuando repongamos stock."
+                      : producto.usa_variantes
+                        ? "Elegi un talle disponible para continuar con la compra."
+                        : canCreatePedido
+                          ? "Vas a completar el pago en Mercado Pago, sin pasos intermedios."
+                          : "Inicia sesion para continuar con una compra segura."
                   }
-                }
-              />
+                  action={
+                    canCreatePedido
+                      ? {
+                          label:
+                            creatingFor === producto.producto_id
+                              ? "Preparando tu pago..."
+                              : producto.usa_variantes &&
+                                  !selectedVarianteByProducto[producto.producto_id]
+                                ? "Elegir talle"
+                                : "Comprar ahora",
+                          onClick: () =>
+                            handleComprar(
+                              producto,
+                              producto.usa_variantes
+                                ? selectedVarianteByProducto[producto.producto_id] ?? null
+                                : null
+                            ),
+                          disabled:
+                            producto.precio <= 0 ||
+                            producto.stock_efectivo <= 0 ||
+                            creatingFor === producto.producto_id ||
+                            (producto.usa_variantes &&
+                              !selectedVarianteByProducto[producto.producto_id]),
+                        }
+                      : {
+                          label: "Iniciar sesion para comprar",
+                          href: "/auth/login",
+                        }
+                  }
+                />
+
+                {producto.usa_variantes && (
+                  <div className="rounded-[24px] border border-stone-200 bg-white px-4 py-4 shadow-sm">
+                    <label className="mb-2 block text-sm font-medium text-stone-900" htmlFor={`variante-${producto.producto_id}`}>
+                      Talle
+                    </label>
+                    <select
+                      id={`variante-${producto.producto_id}`}
+                      value={selectedVarianteByProducto[producto.producto_id] ?? ""}
+                      onChange={(event) => {
+                        setSelectedVarianteByProducto((prev) => ({
+                          ...prev,
+                          [producto.producto_id]: event.target.value,
+                        }));
+                        setCheckoutError(null);
+                      }}
+                      disabled={producto.stock_efectivo <= 0 || creatingFor === producto.producto_id}
+                      className="w-full rounded-full border border-stone-300 bg-white px-4 py-3 text-sm text-stone-900 outline-none transition focus:border-stone-500 disabled:cursor-not-allowed disabled:bg-stone-100"
+                    >
+                      <option value="">Elegi un talle</option>
+                      {producto.variantes.map((variante) => (
+                        <option key={variante.variante_id} value={variante.variante_id}>
+                          {variante.talle}
+                        </option>
+                      ))}
+                    </select>
+                    {producto.variantes.length === 0 && (
+                      <p className="mt-2 text-xs text-stone-500">
+                        No hay variantes activas disponibles ahora.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         )}
