@@ -16,6 +16,9 @@ const DOMAIN_ERROR_STATUS: Record<string, number> = {
   direccion_no_pertenece_al_usuario: 400,
   producto_no_existe: 400,
   producto_no_pertenece_a_empresa: 400,
+  variante_id_required: 400,
+  variante_no_pertenece_al_producto: 400,
+  variante_inactiva: 400,
   variantes_no_soportadas_en_v1: 400,
 };
 
@@ -160,11 +163,19 @@ export default async function handler(
       return res.status(400).json({ error: "items_required" });
     }
 
+    const rpcItems = items.map((item: any) => ({
+      ...item,
+      variante_id:
+        typeof item?.variante_id === "string" && item.variante_id.trim().length > 0
+          ? item.variante_id.trim()
+          : null,
+    }));
+
     const { data, error } = await supabaseServer.rpc("crear_pedido_con_items", {
       p_usuario_id: usuarioId,
       p_empresa_id: empresa_id,
       p_direccion_envio_id: direccionEnvioId,
-      p_items: items,
+      p_items: rpcItems,
     });
 
     if (error) {
