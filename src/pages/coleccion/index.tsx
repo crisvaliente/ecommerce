@@ -478,27 +478,20 @@ const ColeccionPage: React.FC<
   return (
     <main className="min-h-screen bg-stone-100 px-4 py-8 text-stone-900 sm:py-10">
       <div className="mx-auto max-w-7xl">
-        <section className="overflow-hidden rounded-[32px] border border-stone-200 bg-gradient-to-br from-stone-950 via-stone-900 to-amber-950 px-6 py-7 text-stone-50 shadow-xl sm:px-8 sm:py-8">
-          <div className="max-w-3xl">
-            <p className="text-xs uppercase tracking-[0.3em] text-amber-200/80">
+        <section className="overflow-hidden rounded-[24px] border border-stone-200 bg-gradient-to-r from-stone-950 via-stone-900 to-stone-950 px-5 py-4 text-stone-50 shadow-sm sm:px-6 sm:py-5">
+          <div className="max-w-2xl">
+            <p className="text-[11px] uppercase tracking-[0.28em] text-amber-200/80">
               {STOREFRONT_TENANT.name}
             </p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl lg:text-[2.8rem]">
-              Coleccion lista para comprar.
+            <h1 className="mt-2 text-xl font-semibold tracking-tight sm:text-2xl">
+              Coleccion disponible para compra directa.
             </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-stone-300 sm:text-base">
-              Elegi un producto disponible y te llevamos directo al checkout. Si ya
-              tenes sesion iniciada, usamos tu direccion guardada mas reciente.
+            <p className="mt-2 max-w-xl text-sm leading-5 text-stone-300">
+              Elegi un producto disponible y segui al checkout con tu cuenta.
             </p>
-            <div className="mt-5 flex flex-wrap items-center gap-2.5 text-sm">
-              <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-stone-100">
-                Productos simples
-              </span>
-              <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-stone-100">
-                Pago con Mercado Pago
-              </span>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs sm:text-sm">
               {tenantSource === "query" && (
-                <span className="rounded-full border border-amber-300/30 bg-amber-200/10 px-3 py-1 text-amber-100">
+                <span className="rounded-full border border-amber-300/30 bg-amber-200/10 px-2.5 py-1 text-amber-100">
                   Vista temporal de prueba
                 </span>
               )}
@@ -506,7 +499,7 @@ const ColeccionPage: React.FC<
           </div>
         </section>
 
-        <section className="mt-5 rounded-[28px] border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
+        <section className="mt-4 rounded-[22px] border border-stone-200 bg-white p-4 shadow-sm sm:p-5">
           {!empresaId && error === "storefront_tenant_not_found" && (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
               <p className="font-medium">La tienda no esta disponible ahora.</p>
@@ -526,20 +519,20 @@ const ColeccionPage: React.FC<
           )}
 
           {empresaId && !error && (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-stone-50 px-4 py-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-stone-50 px-4 py-3">
               <div>
                 <p className="text-sm font-medium text-stone-900">
                   {canCreatePedido
                     ? `Comprando como ${dbUser?.correo ?? "tu cuenta"}`
                     : "Inicia sesion para comprar de forma segura"}
                 </p>
-                <p className="mt-1 text-sm text-stone-600">
+                <p className="mt-1 text-xs text-stone-600 sm:text-sm">
                   {canCreatePedido
                     ? "Armamos tu pedido y te llevamos directo a Mercado Pago para completar el pago."
                     : "Necesitas una cuenta con una direccion guardada para avanzar al checkout."}
                 </p>
                 {canCreatePedido && hasAddress === false && (
-                  <p className="mt-2 text-sm text-rose-700">
+                  <p className="mt-2 text-xs text-rose-700 sm:text-sm">
                     Antes de comprar, necesitas guardar una direccion en tu cuenta.
                   </p>
                 )}
