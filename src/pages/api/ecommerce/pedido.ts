@@ -19,6 +19,7 @@ const DOMAIN_ERROR_STATUS: Record<string, number> = {
   variante_id_required: 400,
   variante_no_pertenece_al_producto: 400,
   variante_inactiva: 400,
+  variante_sin_stock: 400,
   variantes_no_soportadas_en_v1: 400,
 };
 

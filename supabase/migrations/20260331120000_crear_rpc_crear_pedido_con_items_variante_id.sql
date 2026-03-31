@@ -131,6 +131,10 @@ begin
         raise exception using message = 'variante_inactiva';
       end if;
 
+      if coalesce(v_variante.stock, 0) <= 0 then
+        raise exception using message = 'variante_sin_stock';
+      end if;
+
       v_talle := v_variante.talle;
     else
       v_variante_id := null;
@@ -197,6 +201,10 @@ begin
 
       if v_variante.activo is not true then
         raise exception using message = 'variante_inactiva';
+      end if;
+
+      if coalesce(v_variante.stock, 0) <= 0 then
+        raise exception using message = 'variante_sin_stock';
       end if;
 
       v_talle := v_variante.talle;

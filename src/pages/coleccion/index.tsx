@@ -330,6 +330,8 @@ const ColeccionPage: React.FC<
         return "No pudimos abrir el checkout ahora. Probá nuevamente en unos segundos.";
       case "unauthorized":
         return "Necesitás iniciar sesión para continuar con la compra.";
+      case "variante_sin_stock":
+        return "La variante seleccionada ya no tiene stock. Elegi otra talla.";
       default:
         return "No pudimos iniciar la compra en este momento. Probá nuevamente.";
     }
