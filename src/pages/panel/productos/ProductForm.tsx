@@ -266,7 +266,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
 // ============================
 // Imágenes: fetch list + signed urls
 // ============================
-const fetchImagenes = async () => {
+const fetchImagenes = async (preserveOnError = false) => {
   if (!productoId) return;
 
   setLoadingImagenes(true);
@@ -284,9 +284,11 @@ const fetchImagenes = async () => {
 
   if (error) {
     console.error("Error cargando imagenes:", error);
-    setImagenes([]);
     setLoadingImagenes(false);
-    return;
+    if (!preserveOnError) {
+      setImagenes([]);
+    }
+    return false;
   }
 
   const rows = (data ?? []) as ImagenProductoRow[];
@@ -305,6 +307,7 @@ const fetchImagenes = async () => {
 
   setImagenes(enriched);
   setLoadingImagenes(false);
+  return true;
 };
 
 
@@ -442,27 +445,20 @@ const handleDeleteImagen = async (img: ImagenProductoUI) => {
 // ============================
 // Imágenes: upload + insert DB (B2 runtime)
 // ============================
-const handleUploadImagen = async (file: File) => {
+const uploadImagen = async (file: File) => {
   if (!productoId) {
-    showError("Primero creá el producto para poder subir imágenes.");
-    return;
+    throw new Error("Primero creá el producto para poder subir imágenes.");
   }
 
   if (!empresaId) {
-    showError("No se encontró una empresa asociada al usuario.");
-    return;
+    throw new Error("No se encontró una empresa asociada al usuario.");
   }
-
-  setUploadingImagen(true);
-  setSaveErr(null);
 
   console.log("[B2] ==== PRE-FLIGHT ====");
   const { data: userRes, error: userErr } = await supabase.auth.getUser();
   if (userErr) {
     console.error("[B2] getUser error:", userErr);
-    showError(userErr.message);
-    setUploadingImagen(false);
-    return;
+    throw new Error(userErr.message);
   }
 
   console.log("[B2] uid:", userRes.user?.id ?? null);
@@ -470,9 +466,7 @@ const handleUploadImagen = async (file: File) => {
   console.log("[B2] productoId:", productoId ?? null);
 
   if (!userRes.user?.id) {
-    showError("Necesitás una sesión válida para subir imágenes.");
-    setUploadingImagen(false);
-    return;
+    throw new Error("Necesitás una sesión válida para subir imágenes.");
   }
 
   let storagePath: string | null = null;
@@ -532,19 +526,18 @@ const handleUploadImagen = async (file: File) => {
     console.log("[B2] insert OK:", inserted);
 
     // 5) signed url preview
-    const signedUrl = await createSignedUrl(
-      inserted.path ?? inserted.url_imagen,
-      60 * 10
-    );
-    console.log("[B2] signedUrl OK");
-
-    setImagenes((prev) => [{ ...inserted, signedUrl }, ...prev]);
-
-    // 6) si fue principal, forzar consistencia
-    if (shouldBePrincipal) {
-      await setPrincipalImagen(inserted.id);
+    let signedUrl: string | undefined;
+    try {
+      signedUrl = await createSignedUrl(
+        inserted.path ?? inserted.url_imagen,
+        60 * 10
+      );
+      console.log("[B2] signedUrl OK");
+    } catch (signedErr) {
+      console.warn("[B2] signedUrl WARN:", signedErr);
     }
-    showSuccess("Imagen subida correctamente.");
+
+    return { ...inserted, signedUrl };
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Error subiendo imagen.";
     console.error("[B2] ERROR:", message);
@@ -562,10 +555,67 @@ const handleUploadImagen = async (file: File) => {
       }
     }
 
-    showError(message);
+    throw new Error(message);
+  }
+};
+
+const handleUploadImagen = async (files: File | FileList | File[]) => {
+  const listaArchivos = Array.isArray(files)
+    ? files
+    : files instanceof File
+      ? [files]
+      : Array.from(files);
+
+  if (listaArchivos.length === 0) return;
+
+  setUploadingImagen(true);
+  setSaveErr(null);
+
+  let uploadedCount = 0;
+  let lastError: string | null = null;
+  let refreshOk = true;
+
+  try {
+    // Semántica actual del lote: secuencial y stop-on-first-error.
+    for (const file of listaArchivos) {
+      const uploaded = await uploadImagen(file);
+
+      if (!uploaded) {
+        continue;
+      }
+
+      uploadedCount += 1;
+      setImagenes((prev) => [...prev, uploaded]);
+    }
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : "Error subiendo imagen.";
+    lastError = uploadedCount > 0
+      ? `Se subieron ${uploadedCount} imagen${uploadedCount === 1 ? "" : "es"}, pero falló la siguiente: ${message}`
+      : message;
   } finally {
+    refreshOk = (await fetchImagenes(true)) !== false;
     setUploadingImagen(false);
   }
+
+  if (!refreshOk) {
+    showError(
+      uploadedCount > 0
+        ? "Las imágenes se subieron, pero no se pudo refrescar el listado final."
+        : "No se pudo refrescar el listado de imágenes."
+    );
+    return;
+  }
+
+  if (lastError) {
+    showError(lastError);
+    return;
+  }
+
+  showSuccess(
+    uploadedCount === 1
+      ? "Imagen subida correctamente."
+      : `${uploadedCount} imágenes subidas correctamente.`
+  );
 };
 
   // ============================
@@ -675,7 +725,7 @@ const handleUploadImagen = async (file: File) => {
   // ============================
   useEffect(() => {
     if (!productoId) return;
-    fetchImagenes();
+    void fetchImagenes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productoId]);
 
@@ -1420,7 +1470,9 @@ const handleDraft = async () => {
           <div className="flex gap-2">
             <Button
               variant="secondary"
-              onClick={fetchImagenes}
+              onClick={() => {
+                void fetchImagenes();
+              }}
               disabled={loadingImagenes || !productoId}
             >
               {loadingImagenes ? "Cargando..." : "Refrescar"}
@@ -1433,11 +1485,12 @@ const handleDraft = async () => {
               <input
                 type="file"
                 accept="image/*"
+                multiple
                 className="hidden"
                 disabled={!productoId || uploadingImagen}
                 onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) handleUploadImagen(f);
+                  const files = Array.from(e.target.files ?? []);
+                  if (files.length > 0) handleUploadImagen(files);
                   e.currentTarget.value = "";
                 }}
               />
