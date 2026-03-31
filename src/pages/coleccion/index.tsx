@@ -583,10 +583,10 @@ const ColeccionPage: React.FC<
         {empresaId && !error && productos.length === 0 && (
           <section className="mt-5 rounded-[28px] border border-stone-200 bg-white p-6 text-center shadow-sm">
             <p className="text-base font-medium text-stone-900">
-              No hay productos disponibles ahora.
+              Estamos preparando la coleccion
             </p>
             <p className="mt-2 text-sm text-stone-600">
-              Estamos actualizando la coleccion. Volve a revisar mas tarde.
+              Muy pronto vas a poder ver los productos disponibles.
             </p>
           </section>
         )}
