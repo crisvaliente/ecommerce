@@ -187,7 +187,6 @@ export default async function handler(
 
     if (itemsErr) {
       console.error("[GET /api/panel/pedidos/:id] itemsErr", itemsErr);
-      return res.status(500).json({ error: "internal_error" });
     }
 
     const { data: intentoPago, error: intentoPagoErr } = await supabaseAdmin
@@ -206,7 +205,6 @@ export default async function handler(
         "[GET /api/panel/pedidos/:id] intentoPagoErr",
         intentoPagoErr
       );
-      return res.status(500).json({ error: "internal_error" });
     }
 
     res.setHeader("Cache-Control", "no-store");
@@ -223,7 +221,7 @@ export default async function handler(
         direccion_envio_snapshot: pedido.direccion_envio_snapshot,
         creado_en: pedido.creado_en,
         actualizado_en: pedido.actualizado_en,
-        items: (items ?? []).map((item) => ({
+        items: (itemsErr ? [] : items ?? []).map((item) => ({
           producto_id: item.producto_id,
           variante_id: item.variante_id,
           nombre_producto: item.nombre_producto,
@@ -232,7 +230,7 @@ export default async function handler(
           cantidad: Number(item.cantidad),
           subtotal: Number(item.subtotal),
         })),
-        intento_pago: intentoPago
+        intento_pago: !intentoPagoErr && intentoPago
           ? {
               id: intentoPago.id,
               estado: intentoPago.estado as IntentoPagoEstado,

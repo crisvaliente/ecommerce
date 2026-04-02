@@ -198,12 +198,28 @@ const PanelPedidoDetailPage: React.FC = () => {
       if (!r.ok) {
         const txt = await r.text().catch(() => "");
         console.error("[panel-pedido-detail] endpoint error:", r.status, txt);
+        let backendError: string | null = null;
+
+        try {
+          const parsed = JSON.parse(txt) as { error?: string };
+          backendError = typeof parsed?.error === "string" ? parsed.error : null;
+        } catch {
+          backendError = null;
+        }
+
+        const detailErrorMessage =
+          r.status === 401
+            ? "Sesión no válida. Volvé a iniciar sesión."
+            : r.status === 403
+              ? "No tenés permisos para ver este pedido."
+              : r.status === 404
+                ? "Pedido no encontrado."
+                : backendError === "internal_error"
+                  ? "No se pudo cargar el detalle completo del pedido. Probá refrescar."
+                  : "No se pudo cargar el detalle del pedido.";
+
         setPedido(null);
-        setErrorMsg(
-          r.status === 404
-            ? "Pedido no encontrado."
-            : "No se pudo cargar el detalle del pedido."
-        );
+        setErrorMsg(detailErrorMessage);
         return;
       }
 
