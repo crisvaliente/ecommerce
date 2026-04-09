@@ -149,7 +149,51 @@ function validateMpWebhookSignature(
 
   const { ts, v1 } = parseHeaderSignature(xSignatureValue);
 
+  const body = (req.body ?? {}) as MpWebhookBody;
+  const queryDataId = getSingleQueryValue(req.query["data.id"]);
+  const queryId = getSingleQueryValue(req.query.id);
+  const bodyDataId = body.data?.id != null ? String(body.data.id) : null;
+  const signatureDataId = queryDataId;
+  const secretRaw = MP_WEBHOOK_SECRET ?? "";
+  const secretPreview =
+    secretRaw.length > 0 ? `${secretRaw.slice(0, 2)}***${secretRaw.slice(-4)}` : null;
+  const v1Preview = v1 ? `${v1.slice(0, 8)}...${v1.slice(-4)}` : null;
+  const xRequestIdPreview = xRequestIdValue
+    ? `${xRequestIdValue.slice(0, 12)}...`
+    : null;
+
+  console.log("[mp-webhook] signature_inputs", {
+    tsParsed: ts,
+    v1Preview,
+    xRequestIdPreview,
+    queryDataId,
+    bodyDataId,
+    queryId,
+    signatureDataId,
+    manifest: null,
+    secretLength: secretRaw.length,
+    secretPreview,
+    calculatedPreview: null,
+    receivedPreview: v1Preview,
+    signatureMatch: null,
+  });
+
   if (!ts || !v1 || !xRequestIdValue || !paymentId) {
+    console.log("[mp-webhook] signature_missing_inputs", {
+      tsParsed: ts,
+      v1Preview,
+      xRequestIdPreview,
+      queryDataId,
+      bodyDataId,
+      queryId,
+      signatureDataId,
+      manifest: null,
+      secretLength: secretRaw.length,
+      secretPreview,
+      calculatedPreview: null,
+      receivedPreview: v1Preview,
+      signatureMatch: null,
+    });
     return false;
   }
 
@@ -164,7 +208,37 @@ function validateMpWebhookSignature(
     .update(manifest)
     .digest("hex");
 
-  return safeCompareHex(calculated, v1);
+  const signatureMatch = safeCompareHex(calculated, v1);
+
+  if (process.env.MP_WEBHOOK_DEBUG_FULL === "true") {
+    console.log("[mp-webhook] signature_compare_full", {
+      xSignatureRaw: xSignatureValue,
+      xRequestIdRaw: xRequestIdValue,
+      tsParsed: ts,
+      v1Raw: v1,
+      calculated,
+      manifest,
+      signatureMatch,
+    });
+  }
+
+  console.log("[mp-webhook] signature_compare", {
+    tsParsed: ts,
+    v1Preview,
+    xRequestIdPreview,
+    queryDataId,
+    bodyDataId,
+    queryId,
+    signatureDataId,
+    manifest,
+    secretLength: secretRaw.length,
+    secretPreview,
+    calculatedPreview: `${calculated.slice(0, 8)}...${calculated.slice(-4)}`,
+    receivedPreview: `${v1.slice(0, 8)}...${v1.slice(-4)}`,
+    signatureMatch,
+  });
+
+  return signatureMatch;
 }
 
 function isRpcSemanticSuccess(rpcRow: RpcRow | null): boolean {
