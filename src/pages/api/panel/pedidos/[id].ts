@@ -33,6 +33,9 @@ type IntentoPagoResponse = {
   canal_pago: string;
   external_id: string | null;
   preference_id?: string | null;
+   notificado_en?: string | null;
+   ultimo_evento_tipo?: string | null;
+   ultimo_evento_payload?: unknown;
   creado_en: string;
   actualizado_en: string;
 };
@@ -192,7 +195,7 @@ export default async function handler(
     const { data: intentoPago, error: intentoPagoErr } = await supabaseAdmin
       .from("intento_pago")
       .select(
-        "id, estado, canal_pago, external_id, preference_id, creado_en, actualizado_en"
+        "id, estado, canal_pago, external_id, preference_id, notificado_en, ultimo_evento_tipo, ultimo_evento_payload, creado_en, actualizado_en"
       )
       .eq("pedido_id", pedido.id)
       .eq("empresa_id", pedido.empresa_id)
@@ -237,6 +240,9 @@ export default async function handler(
               canal_pago: intentoPago.canal_pago,
               external_id: intentoPago.external_id,
               preference_id: intentoPago.preference_id ?? null,
+              notificado_en: intentoPago.notificado_en ?? null,
+              ultimo_evento_tipo: intentoPago.ultimo_evento_tipo ?? null,
+              ultimo_evento_payload: intentoPago.ultimo_evento_payload ?? null,
               creado_en: intentoPago.creado_en,
               actualizado_en: intentoPago.actualizado_en,
             }

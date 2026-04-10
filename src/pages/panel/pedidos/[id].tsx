@@ -38,6 +38,9 @@ type IntentoPago = {
   canal_pago: string;
   external_id: string | null;
   preference_id?: string | null;
+  notificado_en?: string | null;
+  ultimo_evento_tipo?: string | null;
+  ultimo_evento_payload?: unknown;
   creado_en: string;
   actualizado_en: string;
 };
@@ -157,6 +160,72 @@ function getIntentoStatusTone(intento: IntentoPago | null): string {
   }
 }
 
+function getCobroBanner(pedido: PedidoDetail): {
+  title: string;
+  message: string;
+  className: string;
+} | null {
+  const intento = pedido.intento_pago;
+
+  if (!intento) return null;
+
+  if (intento.estado === "aprobado" && pedido.estado === "pagado") {
+    return {
+      title: "Cobro consolidado",
+      message: "El pago fue aprobado y el pedido ya quedó consolidado correctamente.",
+      className: "border-emerald-200 bg-emerald-50 text-emerald-900",
+    };
+  }
+
+  if (intento.estado === "aprobado" && pedido.estado !== "pagado") {
+    return {
+      title: "Pago aprobado no consolidado",
+      message:
+        pedido.estado === "bloqueado"
+          ? "El pago fue aprobado, pero el pedido quedó bloqueado y requiere revisión operativa."
+          : "El pago fue aprobado, pero el pedido todavía no quedó consolidado como pagado.",
+      className: "border-amber-200 bg-amber-50 text-amber-900",
+    };
+  }
+
+  return null;
+}
+
+function getUltimoPayloadResumen(intento: IntentoPago | null): Array<{
+  label: string;
+  value: string;
+}> {
+  if (!intento?.ultimo_evento_payload || typeof intento.ultimo_evento_payload !== "object") {
+    return [];
+  }
+
+  const payload = intento.ultimo_evento_payload as Record<string, unknown>;
+  const rows: Array<{ label: string; value: string | null }> = [
+    {
+      label: "Status MP",
+      value: typeof payload.status === "string" ? payload.status : null,
+    },
+    {
+      label: "Detalle",
+      value: typeof payload.status_detail === "string" ? payload.status_detail : null,
+    },
+    {
+      label: "Referencia externa",
+      value:
+        typeof payload.external_reference === "string" ? payload.external_reference : null,
+    },
+    {
+      label: "Pago externo",
+      value:
+        typeof payload.id === "string" || typeof payload.id === "number"
+          ? String(payload.id)
+          : null,
+    },
+  ];
+
+  return rows.filter((row): row is { label: string; value: string } => Boolean(row.value));
+}
+
 const PanelPedidoDetailPage: React.FC = () => {
   const router = useRouter();
   const pedidoId =
@@ -166,6 +235,8 @@ const PanelPedidoDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const pedidoBanner = pedido ? getPedidoBanner(pedido) : null;
+  const cobroBanner = pedido ? getCobroBanner(pedido) : null;
+  const ultimoPayloadResumen = pedido ? getUltimoPayloadResumen(pedido.intento_pago) : [];
 
   const fetchPedido = useCallback(async () => {
     if (!pedidoId) return;
@@ -346,6 +417,13 @@ const PanelPedidoDetailPage: React.FC = () => {
               </p>
             ) : (
               <div className="space-y-5">
+                {cobroBanner && (
+                  <section className={`rounded-xl border p-4 ${cobroBanner.className}`}>
+                    <p className="text-sm font-semibold">{cobroBanner.title}</p>
+                    <p className="mt-1 text-sm opacity-90">{cobroBanner.message}</p>
+                  </section>
+                )}
+
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
                   <div>
                     <p className="text-xs uppercase tracking-wide text-muted">
@@ -374,6 +452,36 @@ const PanelPedidoDetailPage: React.FC = () => {
                 </div>
 
                 <Card className="p-4" muted>
+                  <h3 className="text-sm font-medium text-text">Señal operativa</h3>
+                  <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-muted">Última notificación</p>
+                      <p className="mt-1 text-sm text-text">
+                        {pedido.intento_pago.notificado_en
+                          ? formatDate(pedido.intento_pago.notificado_en)
+                          : "Sin webhook registrado"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-muted">Último evento</p>
+                      <p className="mt-1 text-sm text-text">
+                        {pedido.intento_pago.ultimo_evento_tipo ?? "Sin evento registrado"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-muted">Lectura operativa</p>
+                      <p className="mt-1 text-sm text-text">
+                        {pedido.intento_pago.estado === "aprobado" && pedido.estado !== "pagado"
+                          ? "Pago aprobado no consolidado"
+                          : pedido.intento_pago.estado === "aprobado" && pedido.estado === "pagado"
+                            ? "Pago consolidado"
+                            : "Sin excepción operativa detectada"}
+                      </p>
+                    </div>
+                  </div>
+                </Card>
+
+                <Card className="p-4" muted>
                   <h3 className="text-sm font-medium text-text">Datos tecnicos</h3>
                   <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                     <div>
@@ -395,6 +503,17 @@ const PanelPedidoDetailPage: React.FC = () => {
                       </p>
                     </div>
                   </div>
+
+                  {ultimoPayloadResumen.length > 0 && (
+                    <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                      {ultimoPayloadResumen.map((item) => (
+                        <div key={item.label}>
+                          <p className="text-xs uppercase tracking-wide text-muted">{item.label}</p>
+                          <p className="mt-1 break-all text-xs text-text">{item.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </Card>
               </div>
             )}
