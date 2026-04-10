@@ -254,6 +254,10 @@ function isRpcSemanticSuccess(rpcRow: RpcRow | null): boolean {
   }
 }
 
+function isRpcNonConsolidatedApproved(rpcRow: RpcRow | null): boolean {
+  return rpcRow?.codigo_resultado === "intento_aprobado_no_consolidado";
+}
+
 function getTraceId(req: NextApiRequest): string {
   const xRequestId = req.headers["x-request-id"];
   const value = typeof xRequestId === "string" ? xRequestId : xRequestId?.[0] ?? null;
@@ -596,7 +600,7 @@ export default async function handler(
         consolidacionOk: rpcRow.consolidacion_ok,
       });
 
-      if (rpcRow.codigo_resultado === "intento_aprobado_sin_consolidar") {
+      if (isRpcNonConsolidatedApproved(rpcRow)) {
         return res.status(503).json({
           error: "rpc_semantic_failure",
           detail: rpcRow.codigo_resultado,
