@@ -68,6 +68,9 @@ type ApiOk =
 type ApiErr = {
   error: string;
   detail?: string;
+  consolidacion_codigo?: string | null;
+  pedido_estado_final?: string | null;
+  intento_pago_consolidado_id?: string | null;
 };
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -598,12 +601,18 @@ export default async function handler(
         codigoResultado: rpcRow.codigo_resultado,
         rpcOk: rpcRow.ok,
         consolidacionOk: rpcRow.consolidacion_ok,
+        consolidacionCodigo: rpcRow.consolidacion_codigo,
+        pedidoEstadoFinal: rpcRow.pedido_estado_final,
+        intentoPagoConsolidadoId: rpcRow.intento_pago_consolidado_id,
       });
 
       if (isRpcNonConsolidatedApproved(rpcRow)) {
-        return res.status(503).json({
-          error: "rpc_semantic_failure",
+        return res.status(409).json({
+          error: "payment_approved_not_consolidated",
           detail: rpcRow.codigo_resultado,
+          consolidacion_codigo: rpcRow.consolidacion_codigo,
+          pedido_estado_final: rpcRow.pedido_estado_final,
+          intento_pago_consolidado_id: rpcRow.intento_pago_consolidado_id,
         });
       }
 
