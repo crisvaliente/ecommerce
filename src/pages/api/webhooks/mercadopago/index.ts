@@ -64,6 +64,7 @@ type ApiOk =
       mp_status: string | null;
       signature_verified: boolean;
       fallback_used: boolean;
+      verification_mode: "signature" | "lookup_fallback";
       rpc: RpcRow | null;
     };
 
@@ -262,6 +263,13 @@ function isRpcSemanticSuccess(rpcRow: RpcRow | null): boolean {
 
 function isRpcNonConsolidatedApproved(rpcRow: RpcRow | null): boolean {
   return rpcRow?.codigo_resultado === "intento_aprobado_no_consolidado";
+}
+
+function getVerificationMode(params: {
+  signatureOk: boolean;
+  fallbackUsed: boolean;
+}): "signature" | "lookup_fallback" {
+  return params.signatureOk && !params.fallbackUsed ? "signature" : "lookup_fallback";
 }
 
 function getTraceId(req: NextApiRequest): string {
@@ -465,6 +473,10 @@ export default async function handler(
     const externalReference = mpPayment.external_reference?.trim() ?? null;
     const mpStatus = mpPayment.status ?? null;
     const internalTargetStatus = mapMpStatusToInternal(mpStatus);
+    const verificationMode = getVerificationMode({
+      signatureOk,
+      fallbackUsed: shouldAttemptLookupFallback,
+    });
 
     console.log("[mp-webhook] payment_resolved", {
       traceId,
@@ -474,6 +486,7 @@ export default async function handler(
       internalTargetStatus,
       signatureOk,
       fallbackUsed: shouldAttemptLookupFallback,
+      verificationMode,
     });
 
     if (shouldAttemptLookupFallback) {
@@ -589,6 +602,7 @@ export default async function handler(
       intentoPagoId: externalReference,
       internalTargetStatus,
       rpcError: rpcErr?.message ?? null,
+      verificationMode,
       rpcRow,
     });
 
@@ -617,6 +631,7 @@ export default async function handler(
         traceId,
         intentoPagoId: externalReference,
         paymentId: externalId,
+        verificationMode,
         codigoResultado: rpcRow.codigo_resultado,
         rpcOk: rpcRow.ok,
         consolidacionOk: rpcRow.consolidacion_ok,
@@ -641,6 +656,17 @@ export default async function handler(
       });
     }
 
+    console.log("[mp-webhook] payment processed", {
+      traceId,
+      paymentId: externalId,
+      intentoPagoId: externalReference,
+      verificationMode,
+      signatureOk,
+      fallbackUsed: shouldAttemptLookupFallback,
+      mpStatus,
+      codigoResultado: rpcRow.codigo_resultado,
+    });
+
     return res.status(200).json({
       ok: true,
       absorbed: true,
@@ -650,6 +676,7 @@ export default async function handler(
       mp_status: mpStatus,
       signature_verified: signatureOk,
       fallback_used: shouldAttemptLookupFallback,
+      verification_mode: verificationMode,
       rpc: rpcRow,
     });
   } catch (err) {
