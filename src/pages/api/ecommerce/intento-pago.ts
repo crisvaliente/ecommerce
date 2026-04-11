@@ -221,7 +221,7 @@ export default async function handler(
     return res.status(500).json({ error: "unexpected_error" });
   }
 
-  if (!(row.ok && row.codigo_resultado === "creado")) {
+  if (!(row.ok && (row.codigo_resultado === "creado" || row.codigo_resultado === "reutilizado"))) {
     const status = mapRpcErrorToStatus(row.codigo_resultado);
     const errorCode =
       status === 500 ? "unexpected_error" : row.codigo_resultado || "unexpected_error";
