@@ -62,6 +62,8 @@ type ApiOk =
       payment_id: string;
       intento_pago_id: string;
       mp_status: string | null;
+      signature_verified: boolean;
+      fallback_used: boolean;
       rpc: RpcRow | null;
     };
 
@@ -78,6 +80,7 @@ const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const MP_ACCESS_TOKEN = process.env.MERCADOPAGO_ACCESS_TOKEN;
 const MP_WEBHOOK_SECRET = process.env.MERCADOPAGO_WEBHOOK_SECRET;
 const DEV_WEBHOOK_MODE = process.env.MP_WEBHOOK_DEV_MODE === "1";
+const LOOKUP_FALLBACK_ENABLED = process.env.MP_WEBHOOK_ALLOW_LOOKUP_FALLBACK === "1";
 
 function getSingleQueryValue(
   value: string | string[] | undefined
@@ -382,14 +385,18 @@ export default async function handler(
 
   const devBypass = isDevBypassEnabled(req);
   const signatureOk = devBypass ? true : validateMpWebhookSignature(req, paymentId);
+  const lookupFallbackEnabled = !devBypass && LOOKUP_FALLBACK_ENABLED;
+  const shouldAttemptLookupFallback = !signatureOk && lookupFallbackEnabled && Boolean(paymentId);
 
   console.log("[mp-webhook] signature", {
     traceId,
     signatureOk,
     devBypass,
+    lookupFallbackEnabled,
+    shouldAttemptLookupFallback,
   });
 
-  if (!signatureOk) {
+  if (!signatureOk && !shouldAttemptLookupFallback) {
     return res.status(401).json({ error: "invalid_webhook_signature" });
   }
 
@@ -465,7 +472,18 @@ export default async function handler(
       externalReference,
       mpStatus,
       internalTargetStatus,
+      signatureOk,
+      fallbackUsed: shouldAttemptLookupFallback,
     });
+
+    if (shouldAttemptLookupFallback) {
+      console.warn("[mp-webhook] processing via lookup fallback", {
+        traceId,
+        paymentId: externalId,
+        externalReference,
+        mpStatus,
+      });
+    }
 
     if (!externalReference) {
       console.log("[mp-webhook] absorbed", {
@@ -491,6 +509,7 @@ export default async function handler(
       externalReference,
       foundIntent: Boolean(existingIntent),
       readError: existingIntentErr?.message ?? null,
+      fallbackUsed: shouldAttemptLookupFallback,
     });
 
     if (existingIntentErr) {
@@ -629,6 +648,8 @@ export default async function handler(
       payment_id: externalId,
       intento_pago_id: externalReference,
       mp_status: mpStatus,
+      signature_verified: signatureOk,
+      fallback_used: shouldAttemptLookupFallback,
       rpc: rpcRow,
     });
   } catch (err) {
