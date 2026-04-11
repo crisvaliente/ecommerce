@@ -19,22 +19,17 @@ values (
 on conflict (id) do nothing;
 
 -- =========================
--- USUARIO
+-- USUARIOS SMOKE
 -- =========================
-insert into public.usuario (
-  id, nombre, correo, rol, empresa_id,
-  supabase_uid, onboarding
-)
-values (
-  'b6292efd-d976-4c74-8e56-7db42515f684',
-  'Admin Smoke',
-  'admin_smoke@local.test',
-  'admin',
-  '1862d031-a8c8-4313-974c-daedad7749ae',
-  '11111111-1111-1111-1111-111111111111',
-  false
-)
-on conflict (id) do nothing;
+-- Los usuarios autenticables smoke se bootstrappean por
+-- Admin API después del db reset con:
+--   pnpm smoke:bootstrap
+--
+-- Razón:
+-- - evita sembrar filas fake en auth.users
+-- - deja usuarios realmente logueables
+-- - aprovecha el trigger handle_new_auth_user()
+-- - evita drift entre auth y public.usuario
 
 -- =========================
 -- CATEGORÍAS
@@ -109,24 +104,8 @@ values
 on conflict do nothing;
 
 
--- =========================
--- DIRECCION_USUARIO smoke B3
--- =========================
-insert into public.direccion_usuario (
-  id,
-  usuario_id,
-  direccion,
-  ciudad,
-  pais
-)
-values (
-  '574ade8f-05bf-40f8-bc0c-2046d031a3cc',
-  'b6292efd-d976-4c74-8e56-7db42515f684',
-  'Calle Test 123',
-  'Montevideo',
-  'Uruguay'
-)
-on conflict (id) do nothing;
+-- La dirección smoke del buyer también se crea en el bootstrap
+-- para que quede enlazada a un usuario real de auth.
 
 
 
