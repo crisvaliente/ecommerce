@@ -51,11 +51,13 @@ type PedidoDetail = {
   total: number;
   expira_en: string;
   bloqueado_por_stock: boolean;
+  intento_pago_consolidado_id: string | null;
   direccion_envio_snapshot: unknown;
   creado_en: string;
   actualizado_en: string;
   items: PedidoItem[];
   intento_pago: IntentoPago | null;
+  intentos_pago: IntentoPago[];
 };
 
 type ApiOk = {
@@ -224,6 +226,16 @@ function getUltimoPayloadResumen(intento: IntentoPago | null): Array<{
   ];
 
   return rows.filter((row): row is { label: string; value: string } => Boolean(row.value));
+}
+
+function getIntentoBadges(pedido: PedidoDetail, intento: IntentoPago, index: number): string[] {
+  const badges: string[] = [];
+
+  if (index === 0) badges.push("Más reciente");
+  if (intento.estado === "iniciado") badges.push("Activo");
+  if (pedido.intento_pago_consolidado_id === intento.id) badges.push("Consolidó pedido");
+
+  return badges;
 }
 
 const PanelPedidoDetailPage: React.FC = () => {
@@ -564,6 +576,82 @@ const PanelPedidoDetailPage: React.FC = () => {
               </div>
             )}
           </Card>
+
+          {pedido.intentos_pago.length > 0 && (
+            <Card className="p-4">
+              <h2 className="mb-3 text-lg font-medium text-text">Historial de intentos</h2>
+
+              <div className="space-y-3">
+                {pedido.intentos_pago.map((intento, index) => {
+                  const badges = getIntentoBadges(pedido, intento, index);
+
+                  return (
+                    <Card key={intento.id} className="p-4" muted>
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium text-text">
+                            {intentoEstadoLabel[intento.estado] ?? intento.estado}
+                          </p>
+                          <p className="mt-1 break-all font-mono text-xs text-muted">
+                            {intento.id}
+                          </p>
+                        </div>
+
+                        {badges.length > 0 && (
+                          <div className="flex flex-wrap gap-2">
+                            {badges.map((badge) => (
+                              <span
+                                key={badge}
+                                className="rounded-full border border-border bg-surface px-2.5 py-1 text-[11px] font-medium text-text"
+                              >
+                                {badge}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                        <div>
+                          <p className="text-xs uppercase tracking-wide text-muted">Canal</p>
+                          <p className="mt-1 text-sm text-text">{intento.canal_pago}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs uppercase tracking-wide text-muted">Creado</p>
+                          <p className="mt-1 text-sm text-text">{formatDate(intento.creado_en)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs uppercase tracking-wide text-muted">Actualizado</p>
+                          <p className="mt-1 text-sm text-text">{formatDate(intento.actualizado_en)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs uppercase tracking-wide text-muted">External ID</p>
+                          <p className="mt-1 break-all text-xs text-text">{intento.external_id ?? "-"}</p>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                        <div>
+                          <p className="text-xs uppercase tracking-wide text-muted">Preference ID</p>
+                          <p className="mt-1 break-all text-xs text-text">{intento.preference_id ?? "-"}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs uppercase tracking-wide text-muted">Última notificación</p>
+                          <p className="mt-1 text-sm text-text">
+                            {intento.notificado_en ? formatDate(intento.notificado_en) : "-"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs uppercase tracking-wide text-muted">Último evento</p>
+                          <p className="mt-1 text-sm text-text">{intento.ultimo_evento_tipo ?? "-"}</p>
+                        </div>
+                      </div>
+                    </Card>
+                  );
+                })}
+              </div>
+            </Card>
+          )}
         </div>
       )}
     </AdminLayout>

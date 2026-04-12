@@ -47,11 +47,13 @@ type ApiOk = {
     total: number;
     expira_en: string;
     bloqueado_por_stock: boolean;
+    intento_pago_consolidado_id: string | null;
     direccion_envio_snapshot: unknown;
     creado_en: string;
     actualizado_en: string;
     items: PedidoItemResponse[];
     intento_pago: IntentoPagoResponse | null;
+    intentos_pago: IntentoPagoResponse[];
   };
 };
 
@@ -154,6 +156,7 @@ export default async function handler(
           total,
           expira_en,
           bloqueado_por_stock,
+          intento_pago_consolidado_id,
           direccion_envio_snapshot,
           creado_en,
           actualizado_en
@@ -192,7 +195,7 @@ export default async function handler(
       console.error("[GET /api/panel/pedidos/:id] itemsErr", itemsErr);
     }
 
-    const { data: intentoPago, error: intentoPagoErr } = await supabaseAdmin
+    const { data: intentosPago, error: intentoPagoErr } = await supabaseAdmin
       .from("intento_pago")
       .select(
         "id, estado, canal_pago, external_id, preference_id, notificado_en, ultimo_evento_tipo, ultimo_evento_payload, creado_en, actualizado_en"
@@ -200,8 +203,7 @@ export default async function handler(
       .eq("pedido_id", pedido.id)
       .eq("empresa_id", pedido.empresa_id)
       .order("creado_en", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .order("id", { ascending: false });
 
     if (intentoPagoErr) {
       console.error(
@@ -209,6 +211,9 @@ export default async function handler(
         intentoPagoErr
       );
     }
+
+    const intentosPagoRows = !intentoPagoErr ? intentosPago ?? [] : [];
+    const intentoPago = intentosPagoRows[0] ?? null;
 
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Panel-Only", "1");
@@ -221,6 +226,7 @@ export default async function handler(
         total: Number(pedido.total),
         expira_en: pedido.expira_en,
         bloqueado_por_stock: Boolean(pedido.bloqueado_por_stock),
+        intento_pago_consolidado_id: pedido.intento_pago_consolidado_id ?? null,
         direccion_envio_snapshot: pedido.direccion_envio_snapshot,
         creado_en: pedido.creado_en,
         actualizado_en: pedido.actualizado_en,
@@ -247,6 +253,18 @@ export default async function handler(
               actualizado_en: intentoPago.actualizado_en,
             }
           : null,
+        intentos_pago: intentosPagoRows.map((intento) => ({
+          id: intento.id,
+          estado: intento.estado as IntentoPagoEstado,
+          canal_pago: intento.canal_pago,
+          external_id: intento.external_id,
+          preference_id: intento.preference_id ?? null,
+          notificado_en: intento.notificado_en ?? null,
+          ultimo_evento_tipo: intento.ultimo_evento_tipo ?? null,
+          ultimo_evento_payload: intento.ultimo_evento_payload ?? null,
+          creado_en: intento.creado_en,
+          actualizado_en: intento.actualizado_en,
+        })),
       },
     });
   } catch (error) {
