@@ -12,6 +12,7 @@ type RpcRow = {
 type PedidoRow = {
   id: string;
   total: number | string | null;
+  expira_en: string | null;
 };
 
 type PreferenceCreateResponse = {
@@ -82,6 +83,17 @@ function normalizeBaseUrl(value: string): string {
   return value.replace(/\/+$/, "");
 }
 
+function buildCheckoutResultUrl(params: {
+  baseUrl: string;
+  pedidoId: string;
+  status: "success" | "failure" | "pending";
+}): string {
+  const url = new URL(`${normalizeBaseUrl(params.baseUrl)}/checkout/resultado`);
+  url.searchParams.set("pedido_id", params.pedidoId);
+  url.searchParams.set("status", params.status);
+  return url.toString();
+}
+
 function toAmount(value: number | string | null): number | null {
   if (typeof value === "number" && Number.isFinite(value) && value > 0) {
     return value;
@@ -103,6 +115,12 @@ async function createMercadoPagoPreference(params: {
   pedidoId: string;
   total: number;
   notificationUrl: string;
+  dateOfExpiration: string;
+  backUrls: {
+    success: string;
+    failure: string;
+    pending: string;
+  };
 }): Promise<PreferenceCreateResponse> {
   const response = await fetch("https://api.mercadopago.com/checkout/preferences", {
     method: "POST",
@@ -113,6 +131,9 @@ async function createMercadoPagoPreference(params: {
     body: JSON.stringify({
       external_reference: params.externalReference,
       notification_url: params.notificationUrl,
+      expires: true,
+      date_of_expiration: params.dateOfExpiration,
+      back_urls: params.backUrls,
       items: [
         {
           id: params.pedidoId,
@@ -235,7 +256,7 @@ export default async function handler(
 
   const { data: pedidoRow, error: pedidoError } = await serviceClient
     .from("pedido")
-    .select("id, total")
+    .select("id, total, expira_en")
     .eq("id", row.pedido_id)
     .single();
 
@@ -246,12 +267,30 @@ export default async function handler(
 
   const pedido = pedidoRow as PedidoRow | null;
   const total = toAmount(pedido?.total ?? null);
+  const expiraEn = pedido?.expira_en ?? null;
 
-  if (pedidoError || !pedido?.id || total === null) {
+  if (pedidoError || !pedido?.id || total === null || !expiraEn) {
     return res.status(500).json({ error: "unexpected_error" });
   }
 
   const notificationUrl = `${normalizeBaseUrl(APP_BASE_URL)}/api/webhooks/mercadopago`;
+  const backUrls = {
+    success: buildCheckoutResultUrl({
+      baseUrl: APP_BASE_URL,
+      pedidoId: row.pedido_id,
+      status: "success",
+    }),
+    failure: buildCheckoutResultUrl({
+      baseUrl: APP_BASE_URL,
+      pedidoId: row.pedido_id,
+      status: "failure",
+    }),
+    pending: buildCheckoutResultUrl({
+      baseUrl: APP_BASE_URL,
+      pedidoId: row.pedido_id,
+      status: "pending",
+    }),
+  };
 
   let preference: PreferenceCreateResponse;
 
@@ -262,6 +301,8 @@ export default async function handler(
       pedidoId: row.pedido_id,
       total,
       notificationUrl,
+      dateOfExpiration: expiraEn,
+      backUrls,
     });
     console.log("[intento-pago] mp response", {
       ok: true,
