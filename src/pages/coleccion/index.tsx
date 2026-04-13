@@ -531,10 +531,13 @@ const ColeccionPage: React.FC<
                     ? "Armamos tu pedido y te llevamos directo a Mercado Pago para completar el pago."
                     : "Necesitas una cuenta con una direccion guardada para avanzar al checkout."}
                 </p>
-                {canCreatePedido && hasAddress === false && (
-                  <p className="mt-2 text-xs text-rose-700 sm:text-sm">
-                    Antes de comprar, necesitas guardar una direccion en tu cuenta.
-                  </p>
+              {canCreatePedido && hasAddress === false && (
+                  <div className="mt-2 text-xs text-rose-700 sm:text-sm">
+                    <p>Antes de comprar, necesitas guardar una direccion en tu cuenta.</p>
+                    <Link href="/mi-cuenta" className="mt-1 inline-flex font-medium underline">
+                      Ir a Mi Cuenta
+                    </Link>
+                  </div>
                 )}
               </div>
 
