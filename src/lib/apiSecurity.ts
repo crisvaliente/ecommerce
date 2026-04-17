@@ -17,7 +17,7 @@ type OriginValidationOptions = {
   allowWithoutOrigin?: boolean;
 };
 
-type OriginValidationResult =
+export type OriginValidationResult =
   | { ok: true; origin: string | null }
   | { ok: false; reason: "missing_origin" | "untrusted_origin"; origin: string | null };
 
@@ -99,6 +99,12 @@ export function validateTrustedOrigin(
   }
 
   return { ok: false, reason: "untrusted_origin", origin };
+}
+
+export function isOriginValidationFailure(
+  result: OriginValidationResult
+): result is Extract<OriginValidationResult, { ok: false }> {
+  return !result.ok;
 }
 
 function getClientIp(req: NextApiRequest): string {

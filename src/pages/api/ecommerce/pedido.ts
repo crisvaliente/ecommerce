@@ -6,6 +6,7 @@ import {
   checkRateLimit,
   hasBearerAuthorization,
   hasSessionAccessCookie,
+  isOriginValidationFailure,
   validateTrustedOrigin,
 } from "../../../lib/apiSecurity";
 
@@ -130,7 +131,7 @@ export default async function handler(
     allowWithoutOrigin: hasBearerAuthorization(req) || !hasSessionAccessCookie(req),
   });
 
-  if (!originValidation.ok) {
+  if (isOriginValidationFailure(originValidation)) {
     return res.status(403).json({ error: originValidation.reason });
   }
 
