@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createClient } from "@supabase/supabase-js";
-import { applyRateLimitHeaders, checkRateLimit } from "../../lib/apiSecurity";
+import { applyRateLimitHeaders, checkRateLimit } from "../../../lib/apiSecurity";
 
 type PedidoEstado =
   | "pendiente_pago"
