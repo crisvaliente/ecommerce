@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createClient } from "@supabase/supabase-js";
+import { applyRateLimitHeaders, checkRateLimit } from "../../lib/apiSecurity";
 
 type PedidoEstado =
   | "pendiente_pago"
@@ -28,6 +29,19 @@ type ApiOk = {
 
 type ApiErr = { error: string };
 
+function getErrorMessage(error: unknown): string {
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof (error as { message?: unknown }).message === "string"
+  ) {
+    return (error as { message: string }).message;
+  }
+
+  return "unknown error";
+}
+
 function getAccessToken(req: NextApiRequest): string | null {
   const auth = req.headers.authorization;
   if (auth && typeof auth === "string") {
@@ -51,6 +65,18 @@ export default async function handler(
   if (req.method !== "GET") {
     res.setHeader("Allow", "GET");
     return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  const rateLimit = checkRateLimit(req, {
+    key: "api:panel:pedidos:list",
+    limit: 60,
+    windowMs: 60_000,
+  });
+
+  applyRateLimitHeaders(res, rateLimit);
+
+  if (!rateLimit.ok) {
+    return res.status(429).json({ error: "rate_limit_exceeded" });
   }
 
   const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -129,7 +155,7 @@ export default async function handler(
         count: pedidos.length,
       },
     });
-  } catch (e: any) {
-    return res.status(500).json({ error: e?.message ?? "unknown error" });
+  } catch (error) {
+    return res.status(500).json({ error: getErrorMessage(error) });
   }
 }

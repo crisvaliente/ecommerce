@@ -1,6 +1,13 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createClient } from "@supabase/supabase-js";
 import { supabaseServer } from "../../../lib/supabaseServer";
+import {
+  applyRateLimitHeaders,
+  checkRateLimit,
+  hasBearerAuthorization,
+  hasSessionAccessCookie,
+  validateTrustedOrigin,
+} from "../../../lib/apiSecurity";
 
 const DOMAIN_ERROR_STATUS: Record<string, number> = {
   empresa_id_required: 400,
@@ -38,6 +45,22 @@ function getErrorMessage(error: unknown): string | null {
   }
 
   return null;
+}
+
+function toRpcItem(item: unknown): Record<string, unknown> {
+  if (!item || typeof item !== "object") {
+    return { variante_id: null };
+  }
+
+  const record = item as Record<string, unknown>;
+
+  return {
+    ...record,
+    variante_id:
+      typeof record.variante_id === "string" && record.variante_id.trim().length > 0
+        ? record.variante_id.trim()
+        : null,
+  };
 }
 
 function getAccessToken(req: NextApiRequest): string | null {
@@ -89,6 +112,26 @@ export default async function handler(
 ) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "method_not_allowed" });
+  }
+
+  const rateLimit = checkRateLimit(req, {
+    key: "api:ecommerce:pedido:create",
+    limit: 20,
+    windowMs: 60_000,
+  });
+
+  applyRateLimitHeaders(res, rateLimit);
+
+  if (!rateLimit.ok) {
+    return res.status(429).json({ error: "rate_limit_exceeded" });
+  }
+
+  const originValidation = validateTrustedOrigin(req, {
+    allowWithoutOrigin: hasBearerAuthorization(req) || !hasSessionAccessCookie(req),
+  });
+
+  if (!originValidation.ok) {
+    return res.status(403).json({ error: originValidation.reason });
   }
 
   if (!SUPABASE_URL || !ANON_KEY || !SERVICE_ROLE) {
@@ -164,13 +207,7 @@ export default async function handler(
       return res.status(400).json({ error: "items_required" });
     }
 
-    const rpcItems = items.map((item: any) => ({
-      ...item,
-      variante_id:
-        typeof item?.variante_id === "string" && item.variante_id.trim().length > 0
-          ? item.variante_id.trim()
-          : null,
-    }));
+    const rpcItems = items.map(toRpcItem);
 
     const { data, error } = await supabaseServer.rpc("crear_pedido_con_items", {
       p_usuario_id: usuarioId,

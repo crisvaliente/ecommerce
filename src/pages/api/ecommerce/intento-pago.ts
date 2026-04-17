@@ -1,5 +1,12 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createClient } from "@supabase/supabase-js";
+import {
+  applyRateLimitHeaders,
+  checkRateLimit,
+  hasBearerAuthorization,
+  hasSessionAccessCookie,
+  validateTrustedOrigin,
+} from "../../../lib/apiSecurity";
 
 type RpcRow = {
   ok: boolean;
@@ -160,6 +167,26 @@ export default async function handler(
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "method_not_allowed" });
+  }
+
+  const rateLimit = checkRateLimit(req, {
+    key: "api:ecommerce:intento-pago:create",
+    limit: 10,
+    windowMs: 60_000,
+  });
+
+  applyRateLimitHeaders(res, rateLimit);
+
+  if (!rateLimit.ok) {
+    return res.status(429).json({ error: "rate_limit_exceeded" });
+  }
+
+  const originValidation = validateTrustedOrigin(req, {
+    allowWithoutOrigin: hasBearerAuthorization(req) || !hasSessionAccessCookie(req),
+  });
+
+  if (!originValidation.ok) {
+    return res.status(403).json({ error: originValidation.reason });
   }
 
   if (

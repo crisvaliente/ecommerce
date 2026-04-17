@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import crypto from "node:crypto";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { applyRateLimitHeaders, checkRateLimit } from "../../../../lib/apiSecurity";
 
 type MpWebhookBody = {
   action?: string;
@@ -474,7 +475,7 @@ async function fetchMpPayment(paymentId: string): Promise<MpPaymentResponse> {
 }
 
 async function registerWebhookReceipt(
-  supabase: any,
+  supabase: SupabaseClient,
   payload: WebhookReceiptInsert
 ): Promise<WebhookReceiptRegistration> {
   const { error } = await supabase.from("webhook_recepcion_mp").insert(payload);
@@ -499,7 +500,7 @@ async function registerWebhookReceipt(
 }
 
 async function updateWebhookReceiptStatus(
-  supabase: any,
+  supabase: SupabaseClient,
   xRequestId: string | null,
   estado: "procesado" | "absorbido" | "error",
   detalle: string
@@ -530,6 +531,18 @@ export default async function handler(
   res: NextApiResponse<ApiOk | ApiErr>
 ) {
   const traceId = getTraceId(req);
+
+  const rateLimit = checkRateLimit(req, {
+    key: "api:webhook:mercadopago",
+    limit: 120,
+    windowMs: 60_000,
+  });
+
+  applyRateLimitHeaders(res, rateLimit);
+
+  if (!rateLimit.ok) {
+    return res.status(429).json({ error: "rate_limit_exceeded" });
+  }
 
   if (req.method !== "POST") {
     console.log("[mp-webhook] method_not_allowed", { traceId, method: req.method });

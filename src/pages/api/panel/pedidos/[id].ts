@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createClient } from "@supabase/supabase-js";
+import { applyRateLimitHeaders, checkRateLimit } from "../../../../lib/apiSecurity";
 
 type PedidoEstado =
   | "pendiente_pago"
@@ -82,6 +83,18 @@ export default async function handler(
   if (req.method !== "GET") {
     res.setHeader("Allow", "GET");
     return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  const rateLimit = checkRateLimit(req, {
+    key: "api:panel:pedidos:detail",
+    limit: 60,
+    windowMs: 60_000,
+  });
+
+  applyRateLimitHeaders(res, rateLimit);
+
+  if (!rateLimit.ok) {
+    return res.status(429).json({ error: "rate_limit_exceeded" });
   }
 
   const rawId = req.query.id;

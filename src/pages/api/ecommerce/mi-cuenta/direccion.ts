@@ -1,5 +1,12 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createClient } from "@supabase/supabase-js";
+import {
+  applyRateLimitHeaders,
+  checkRateLimit,
+  hasBearerAuthorization,
+  hasSessionAccessCookie,
+  validateTrustedOrigin,
+} from "../../../../lib/apiSecurity";
 
 type DireccionPayload = {
   direccion: string;
@@ -79,6 +86,28 @@ export default async function handler(
   if (req.method !== "GET" && req.method !== "PUT") {
     res.setHeader("Allow", "GET, PUT");
     return res.status(405).json({ error: "method_not_allowed" });
+  }
+
+  const rateLimit = checkRateLimit(req, {
+    key: req.method === "PUT" ? "api:ecommerce:direccion:write" : "api:ecommerce:direccion:read",
+    limit: req.method === "PUT" ? 20 : 60,
+    windowMs: 60_000,
+  });
+
+  applyRateLimitHeaders(res, rateLimit);
+
+  if (!rateLimit.ok) {
+    return res.status(429).json({ error: "rate_limit_exceeded" });
+  }
+
+  if (req.method === "PUT") {
+    const originValidation = validateTrustedOrigin(req, {
+      allowWithoutOrigin: hasBearerAuthorization(req) || !hasSessionAccessCookie(req),
+    });
+
+    if (!originValidation.ok) {
+      return res.status(403).json({ error: originValidation.reason });
+    }
   }
 
   if (!SUPABASE_URL || !ANON_KEY || !SERVICE_ROLE) {

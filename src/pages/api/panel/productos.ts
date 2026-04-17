@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createClient } from "@supabase/supabase-js";
+import { applyRateLimitHeaders, checkRateLimit } from "../../lib/apiSecurity";
 
 type ProductoEstado = "draft" | "published";
 
@@ -43,6 +44,19 @@ type ApiOk = {
 
 type ApiErr = { error: string };
 
+function getErrorMessage(error: unknown): string {
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof (error as { message?: unknown }).message === "string"
+  ) {
+    return (error as { message: string }).message;
+  }
+
+  return "unknown error";
+}
+
 function getEmpresaId(req: NextApiRequest): string | null {
   const raw = req.query.empresa_id;
   const empresa_id = Array.isArray(raw) ? raw[0] : raw;
@@ -74,6 +88,18 @@ export default async function handler(
   if (req.method !== "GET") {
     res.setHeader("Allow", "GET");
     return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  const rateLimit = checkRateLimit(req, {
+    key: "api:panel:productos:list",
+    limit: 60,
+    windowMs: 60_000,
+  });
+
+  applyRateLimitHeaders(res, rateLimit);
+
+  if (!rateLimit.ok) {
+    return res.status(429).json({ error: "rate_limit_exceeded" });
   }
 
   // Guard env vars antes de crear clientes
@@ -204,7 +230,7 @@ export default async function handler(
         auth_mode: "bearer_or_cookie",
       },
     });
-  } catch (e: any) {
-    return res.status(500).json({ error: e?.message ?? "unknown error" });
+  } catch (error) {
+    return res.status(500).json({ error: getErrorMessage(error) });
   }
 }
