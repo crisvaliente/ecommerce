@@ -28,6 +28,48 @@ type MpPaymentResponse = {
   external_reference?: string | null;
 };
 
+type WebhookReceiptInsert = {
+  provider_event_id: string | null;
+  x_request_id: string;
+  payment_id: string;
+  topic: string | null;
+  action: string | null;
+  signature_ts: number;
+  trace_id: string;
+  verification_mode: "signature";
+};
+
+type WebhookReceiptRegistration =
+  | {
+      ok: true;
+      duplicate: false;
+    }
+  | {
+      ok: true;
+      duplicate: true;
+      reason: "duplicate_x_request_id" | "duplicate_provider_event_id";
+    }
+  | {
+      ok: false;
+      duplicate: false;
+      detail: string;
+    };
+
+type SignatureValidationResult = {
+  ok: boolean;
+  reason:
+    | "ok"
+    | "missing_secret"
+    | "missing_inputs"
+    | "invalid_ts"
+    | "stale_ts"
+    | "future_ts"
+    | "invalid_signature";
+  ts: string | null;
+  tsUnix: number | null;
+  xRequestId: string | null;
+};
+
 type RpcRow = {
   ok: boolean;
   codigo_resultado: string;
@@ -49,6 +91,7 @@ type ApiOk =
       reason:
         | "not_payment_event"
         | "missing_payment_id"
+        | "duplicate_delivery"
         | "payment_lookup_failed"
         | "payment_without_external_reference"
         | "payment_not_correlatable"
@@ -64,7 +107,7 @@ type ApiOk =
       mp_status: string | null;
       signature_verified: boolean;
       fallback_used: boolean;
-      verification_mode: "signature" | "lookup_fallback";
+      verification_mode: "signature" | "lookup_fallback" | "dev_bypass";
       rpc: RpcRow | null;
     };
 
@@ -81,7 +124,13 @@ const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const MP_ACCESS_TOKEN = process.env.MERCADOPAGO_ACCESS_TOKEN;
 const MP_WEBHOOK_SECRET = process.env.MERCADOPAGO_WEBHOOK_SECRET;
 const DEV_WEBHOOK_MODE = process.env.MP_WEBHOOK_DEV_MODE === "1";
-const LOOKUP_FALLBACK_ENABLED = process.env.MP_WEBHOOK_ALLOW_LOOKUP_FALLBACK === "1";
+const LOOKUP_FALLBACK_ENABLED =
+  process.env.NODE_ENV !== "production" &&
+  process.env.MP_WEBHOOK_ALLOW_LOOKUP_FALLBACK === "1";
+const MP_WEBHOOK_MAX_SIGNATURE_AGE_SECONDS = Number(
+  process.env.MP_WEBHOOK_MAX_SIGNATURE_AGE_SECONDS ?? "300"
+);
+const MP_WEBHOOK_MAX_FUTURE_SKEW_SECONDS = 30;
 
 function getSingleQueryValue(
   value: string | string[] | undefined
@@ -128,6 +177,28 @@ function buildWebhookManifest(params: {
   return `id:${params.dataId};request-id:${params.xRequestId};ts:${params.ts};`;
 }
 
+function parseUnixTimestamp(ts: string | null): number | null {
+  if (!ts) return null;
+  if (!/^\d+$/.test(ts)) return null;
+
+  const parsed = Number(ts);
+
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
+function isUniqueViolation(error: { code?: string } | null | undefined): boolean {
+  return error?.code === "23505";
+}
+
+function getDuplicateReason(message: string): "duplicate_x_request_id" | "duplicate_provider_event_id" {
+  if (message.includes("ux_mp_webhook_recepcion_provider_event_id")) {
+    return "duplicate_provider_event_id";
+  }
+
+  return "duplicate_x_request_id";
+}
+
 function resolveWebhookPaymentId(
   req: NextApiRequest,
   body?: MpWebhookBody
@@ -143,8 +214,16 @@ function resolveWebhookPaymentId(
 function validateMpWebhookSignature(
   req: NextApiRequest,
   paymentId: string | null
-): boolean {
-  if (!MP_WEBHOOK_SECRET) return false;
+): SignatureValidationResult {
+  if (!MP_WEBHOOK_SECRET) {
+    return {
+      ok: false,
+      reason: "missing_secret",
+      ts: null,
+      tsUnix: null,
+      xRequestId: null,
+    };
+  }
 
   const xSignature = req.headers["x-signature"];
   const xRequestId = req.headers["x-request-id"];
@@ -161,47 +240,97 @@ function validateMpWebhookSignature(
   const queryId = getSingleQueryValue(req.query.id);
   const bodyDataId = body.data?.id != null ? String(body.data.id) : null;
   const signatureDataId = queryDataId;
-  const secretRaw = MP_WEBHOOK_SECRET ?? "";
-  const secretPreview =
-    secretRaw.length > 0 ? `${secretRaw.slice(0, 2)}***${secretRaw.slice(-4)}` : null;
   const v1Preview = v1 ? `${v1.slice(0, 8)}...${v1.slice(-4)}` : null;
   const xRequestIdPreview = xRequestIdValue
     ? `${xRequestIdValue.slice(0, 12)}...`
     : null;
+  const tsUnix = parseUnixTimestamp(ts);
 
   console.log("[mp-webhook] signature_inputs", {
     tsParsed: ts,
+    tsUnix,
     v1Preview,
     xRequestIdPreview,
     queryDataId,
     bodyDataId,
     queryId,
     signatureDataId,
-    manifest: null,
-    secretLength: secretRaw.length,
-    secretPreview,
-    calculatedPreview: null,
-    receivedPreview: v1Preview,
-    signatureMatch: null,
+    hasSecret: Boolean(MP_WEBHOOK_SECRET),
   });
 
   if (!ts || !v1 || !xRequestIdValue || !paymentId) {
     console.log("[mp-webhook] signature_missing_inputs", {
       tsParsed: ts,
+      tsUnix,
       v1Preview,
       xRequestIdPreview,
       queryDataId,
       bodyDataId,
       queryId,
       signatureDataId,
-      manifest: null,
-      secretLength: secretRaw.length,
-      secretPreview,
-      calculatedPreview: null,
-      receivedPreview: v1Preview,
-      signatureMatch: null,
+      hasSecret: Boolean(MP_WEBHOOK_SECRET),
     });
-    return false;
+    return {
+      ok: false,
+      reason: "missing_inputs",
+      ts,
+      tsUnix,
+      xRequestId: xRequestIdValue,
+    };
+  }
+
+  if (tsUnix == null) {
+    console.warn("[mp-webhook] signature_invalid_ts", {
+      tsParsed: ts,
+      xRequestIdPreview,
+      paymentId,
+    });
+
+    return {
+      ok: false,
+      reason: "invalid_ts",
+      ts,
+      tsUnix: null,
+      xRequestId: xRequestIdValue,
+    };
+  }
+
+  const nowUnix = Math.floor(Date.now() / 1000);
+
+  if (tsUnix < nowUnix - MP_WEBHOOK_MAX_SIGNATURE_AGE_SECONDS) {
+    console.warn("[mp-webhook] signature_stale", {
+      tsUnix,
+      nowUnix,
+      maxAgeSeconds: MP_WEBHOOK_MAX_SIGNATURE_AGE_SECONDS,
+      xRequestIdPreview,
+      paymentId,
+    });
+
+    return {
+      ok: false,
+      reason: "stale_ts",
+      ts,
+      tsUnix,
+      xRequestId: xRequestIdValue,
+    };
+  }
+
+  if (tsUnix > nowUnix + MP_WEBHOOK_MAX_FUTURE_SKEW_SECONDS) {
+    console.warn("[mp-webhook] signature_future_ts", {
+      tsUnix,
+      nowUnix,
+      maxFutureSkewSeconds: MP_WEBHOOK_MAX_FUTURE_SKEW_SECONDS,
+      xRequestIdPreview,
+      paymentId,
+    });
+
+    return {
+      ok: false,
+      reason: "future_ts",
+      ts,
+      tsUnix,
+      xRequestId: xRequestIdValue,
+    };
   }
 
   const manifest = buildWebhookManifest({
@@ -231,6 +360,7 @@ function validateMpWebhookSignature(
 
   console.log("[mp-webhook] signature_compare", {
     tsParsed: ts,
+    tsUnix,
     v1Preview,
     xRequestIdPreview,
     queryDataId,
@@ -238,14 +368,18 @@ function validateMpWebhookSignature(
     queryId,
     signatureDataId,
     manifest,
-    secretLength: secretRaw.length,
-    secretPreview,
     calculatedPreview: `${calculated.slice(0, 8)}...${calculated.slice(-4)}`,
     receivedPreview: `${v1.slice(0, 8)}...${v1.slice(-4)}`,
     signatureMatch,
   });
 
-  return signatureMatch;
+  return {
+    ok: signatureMatch,
+    reason: signatureMatch ? "ok" : "invalid_signature",
+    ts,
+    tsUnix,
+    xRequestId: xRequestIdValue,
+  };
 }
 
 function isRpcSemanticSuccess(rpcRow: RpcRow | null): boolean {
@@ -266,9 +400,11 @@ function isRpcNonConsolidatedApproved(rpcRow: RpcRow | null): boolean {
 }
 
 function getVerificationMode(params: {
+  devBypass: boolean;
   signatureOk: boolean;
   fallbackUsed: boolean;
-}): "signature" | "lookup_fallback" {
+}): "signature" | "lookup_fallback" | "dev_bypass" {
+  if (params.devBypass) return "dev_bypass";
   return params.signatureOk && !params.fallbackUsed ? "signature" : "lookup_fallback";
 }
 
@@ -337,6 +473,58 @@ async function fetchMpPayment(paymentId: string): Promise<MpPaymentResponse> {
   return (await resp.json()) as MpPaymentResponse;
 }
 
+async function registerWebhookReceipt(
+  supabase: any,
+  payload: WebhookReceiptInsert
+): Promise<WebhookReceiptRegistration> {
+  const { error } = await supabase.from("webhook_recepcion_mp").insert(payload);
+
+  if (!error) {
+    return { ok: true, duplicate: false };
+  }
+
+  if (isUniqueViolation(error)) {
+    return {
+      ok: true,
+      duplicate: true,
+      reason: getDuplicateReason(error.message ?? ""),
+    };
+  }
+
+  return {
+    ok: false,
+    duplicate: false,
+    detail: error.message,
+  };
+}
+
+async function updateWebhookReceiptStatus(
+  supabase: any,
+  xRequestId: string | null,
+  estado: "procesado" | "absorbido" | "error",
+  detalle: string
+): Promise<void> {
+  if (!xRequestId) return;
+
+  const { error } = await supabase
+    .from("webhook_recepcion_mp")
+    .update({
+      estado,
+      detalle,
+      procesado_en: new Date().toISOString(),
+    })
+    .eq("x_request_id", xRequestId);
+
+  if (error) {
+    console.error("[mp-webhook] receipt_status_update_failed", {
+      xRequestId,
+      estado,
+      detalle,
+      error: error.message,
+    });
+  }
+}
+
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse<ApiOk | ApiErr>
@@ -392,13 +580,23 @@ export default async function handler(
   }
 
   const devBypass = isDevBypassEnabled(req);
-  const signatureOk = devBypass ? true : validateMpWebhookSignature(req, paymentId);
+  const signatureResult = devBypass
+    ? {
+        ok: true,
+        reason: "ok" as const,
+        ts: null,
+        tsUnix: null,
+        xRequestId: null,
+      }
+    : validateMpWebhookSignature(req, paymentId);
+  const signatureOk = signatureResult.ok;
   const lookupFallbackEnabled = !devBypass && LOOKUP_FALLBACK_ENABLED;
   const shouldAttemptLookupFallback = !signatureOk && lookupFallbackEnabled && Boolean(paymentId);
 
   console.log("[mp-webhook] signature", {
     traceId,
     signatureOk,
+    signatureReason: signatureResult.reason,
     devBypass,
     lookupFallbackEnabled,
     shouldAttemptLookupFallback,
@@ -430,6 +628,43 @@ export default async function handler(
   });
 
   try {
+    if (!devBypass && signatureOk && signatureResult.xRequestId && signatureResult.tsUnix != null) {
+      const registration = await registerWebhookReceipt(supabase, {
+        provider_event_id: body.id != null ? String(body.id) : null,
+        x_request_id: signatureResult.xRequestId,
+        payment_id: paymentId,
+        topic: eventType ?? null,
+        action: body.action ?? null,
+        signature_ts: signatureResult.tsUnix,
+        trace_id: traceId,
+        verification_mode: "signature",
+      });
+
+      console.log("[mp-webhook] receipt_registration", {
+        traceId,
+        paymentId,
+        xRequestId: signatureResult.xRequestId,
+        providerEventId: body.id != null ? String(body.id) : null,
+        registration,
+      });
+
+      if (!registration.ok) {
+        return res.status(500).json({
+          error: "webhook_receipt_registration_failed",
+          detail: "detail" in registration ? registration.detail : "unknown_error",
+        });
+      }
+
+      if (registration.duplicate) {
+        return res.status(200).json({
+          ok: true,
+          absorbed: true,
+          reason: "duplicate_delivery",
+          paymentId,
+        });
+      }
+    }
+
     let mpPayment: MpPaymentResponse;
     const mockPayment = devBypass ? getMockPaymentFromBody(body) : null;
 
@@ -462,6 +697,13 @@ export default async function handler(
           detail,
         });
 
+        await updateWebhookReceiptStatus(
+          supabase,
+          signatureResult.xRequestId,
+          "error",
+          "payment_lookup_failed"
+        );
+
         return res.status(502).json({
           error: "payment_lookup_failed",
           detail,
@@ -474,9 +716,11 @@ export default async function handler(
     const mpStatus = mpPayment.status ?? null;
     const internalTargetStatus = mapMpStatusToInternal(mpStatus);
     const verificationMode = getVerificationMode({
+      devBypass,
       signatureOk,
       fallbackUsed: shouldAttemptLookupFallback,
     });
+    const signatureVerified = !devBypass && signatureOk;
 
     console.log("[mp-webhook] payment_resolved", {
       traceId,
@@ -485,6 +729,7 @@ export default async function handler(
       mpStatus,
       internalTargetStatus,
       signatureOk,
+      signatureVerified,
       fallbackUsed: shouldAttemptLookupFallback,
       verificationMode,
     });
@@ -499,6 +744,13 @@ export default async function handler(
     }
 
     if (!externalReference) {
+      await updateWebhookReceiptStatus(
+        supabase,
+        signatureResult.xRequestId,
+        "absorbido",
+        "payment_without_external_reference"
+      );
+
       console.log("[mp-webhook] absorbed", {
         traceId,
         reason: "payment_without_external_reference",
@@ -526,6 +778,13 @@ export default async function handler(
     });
 
     if (existingIntentErr) {
+      await updateWebhookReceiptStatus(
+        supabase,
+        signatureResult.xRequestId,
+        "error",
+        "db_read_failed"
+      );
+
       return res.status(500).json({
         error: "db_read_failed",
         detail: existingIntentErr.message,
@@ -533,6 +792,13 @@ export default async function handler(
     }
 
     if (!existingIntent) {
+      await updateWebhookReceiptStatus(
+        supabase,
+        signatureResult.xRequestId,
+        "absorbido",
+        "payment_not_correlatable"
+      );
+
       console.log("[mp-webhook] absorbed", {
         traceId,
         reason: "payment_not_correlatable",
@@ -566,6 +832,13 @@ export default async function handler(
     });
 
     if (updateErr) {
+      await updateWebhookReceiptStatus(
+        supabase,
+        signatureResult.xRequestId,
+        "error",
+        "db_update_failed"
+      );
+
       return res.status(500).json({
         error: "db_update_failed",
         detail: updateErr.message,
@@ -573,6 +846,13 @@ export default async function handler(
     }
 
     if (!internalTargetStatus) {
+      await updateWebhookReceiptStatus(
+        supabase,
+        signatureResult.xRequestId,
+        "absorbido",
+        "payment_status_ignored"
+      );
+
       console.log("[mp-webhook] absorbed", {
         traceId,
         reason: "payment_status_ignored",
@@ -607,6 +887,13 @@ export default async function handler(
     });
 
     if (rpcErr) {
+      await updateWebhookReceiptStatus(
+        supabase,
+        signatureResult.xRequestId,
+        "error",
+        "rpc_failed"
+      );
+
       return res.status(500).json({
         error: "rpc_failed",
         detail: rpcErr.message,
@@ -614,6 +901,13 @@ export default async function handler(
     }
 
     if (!rpcRow) {
+      await updateWebhookReceiptStatus(
+        supabase,
+        signatureResult.xRequestId,
+        "error",
+        "rpc_without_result"
+      );
+
       console.error("[mp-webhook] rpc semantic failure", {
         traceId,
         intentoPagoId: externalReference,
@@ -627,6 +921,13 @@ export default async function handler(
     }
 
     if (!isRpcSemanticSuccess(rpcRow)) {
+      await updateWebhookReceiptStatus(
+        supabase,
+        signatureResult.xRequestId,
+        "error",
+        `rpc_semantic_failure:${rpcRow.codigo_resultado}`
+      );
+
       console.error("[mp-webhook] rpc semantic failure", {
         traceId,
         intentoPagoId: externalReference,
@@ -661,11 +962,18 @@ export default async function handler(
       paymentId: externalId,
       intentoPagoId: externalReference,
       verificationMode,
-      signatureOk,
+      signatureVerified,
       fallbackUsed: shouldAttemptLookupFallback,
       mpStatus,
       codigoResultado: rpcRow.codigo_resultado,
     });
+
+    await updateWebhookReceiptStatus(
+      supabase,
+      signatureResult.xRequestId,
+      "procesado",
+      rpcRow.codigo_resultado
+    );
 
     return res.status(200).json({
       ok: true,
@@ -674,7 +982,7 @@ export default async function handler(
       payment_id: externalId,
       intento_pago_id: externalReference,
       mp_status: mpStatus,
-      signature_verified: signatureOk,
+      signature_verified: signatureVerified,
       fallback_used: shouldAttemptLookupFallback,
       verification_mode: verificationMode,
       rpc: rpcRow,
@@ -685,6 +993,14 @@ export default async function handler(
       traceId,
       detail,
     });
+
+    await updateWebhookReceiptStatus(
+      supabase,
+      signatureResult.xRequestId,
+      "error",
+      "webhook_processing_failed"
+    );
+
     return res.status(500).json({
       error: "webhook_processing_failed",
       detail,
