@@ -68,7 +68,7 @@ Revisa, en la medida en que existan, estas capas:
 ### 1. Documentación y continuidad
 - `README`
 - `docs/`
-- `docs/OAF-TC.md`
+- `docs/operations/technical-continuity/OAF-TC.md`
 - contratos
 - deltas operativos
 - anclas técnicas
