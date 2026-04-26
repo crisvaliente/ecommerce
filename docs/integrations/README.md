@@ -2,9 +2,12 @@
 
 Documentación de integraciones externas.
 
-Ejemplos:
+## Subcarpetas
 
-- Mercado Pago
+- `mercadopago/` — checkout, webhook, checklist operativo y troubleshooting
+
+## Otros temas posibles
+
 - Supabase
 - correo / SMTP
 - almacenamiento
