@@ -170,12 +170,28 @@ function safeCompareHex(a: string, b: string): boolean {
   return crypto.timingSafeEqual(aBuf, bBuf);
 }
 
+function normalizeSignatureDataId(value: string | null): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return /^[a-z0-9]+$/i.test(trimmed) ? trimmed.toLowerCase() : trimmed;
+}
+
 function buildWebhookManifest(params: {
-  dataId: string;
+  dataId: string | null;
   xRequestId: string;
   ts: string;
 }): string {
-  return `id:${params.dataId};request-id:${params.xRequestId};ts:${params.ts};`;
+  const parts: string[] = [];
+
+  if (params.dataId) {
+    parts.push(`id:${params.dataId}`);
+  }
+
+  parts.push(`request-id:${params.xRequestId}`);
+  parts.push(`ts:${params.ts}`);
+
+  return `${parts.join(";")};`;
 }
 
 function parseUnixTimestamp(ts: string | null): number | null {
@@ -237,7 +253,7 @@ function validateMpWebhookSignature(
   const { ts, v1 } = parseHeaderSignature(xSignatureValue);
 
   const body = (req.body ?? {}) as MpWebhookBody;
-  const queryDataId = getSingleQueryValue(req.query["data.id"]);
+  const queryDataId = normalizeSignatureDataId(getSingleQueryValue(req.query["data.id"]));
   const queryId = getSingleQueryValue(req.query.id);
   const bodyDataId = body.data?.id != null ? String(body.data.id) : null;
   const signatureDataId = queryDataId;
@@ -259,7 +275,7 @@ function validateMpWebhookSignature(
     hasSecret: Boolean(MP_WEBHOOK_SECRET),
   });
 
-  if (!ts || !v1 || !xRequestIdValue || !paymentId) {
+  if (!ts || !v1 || !xRequestIdValue) {
     console.log("[mp-webhook] signature_missing_inputs", {
       tsParsed: ts,
       tsUnix,
@@ -335,7 +351,7 @@ function validateMpWebhookSignature(
   }
 
   const manifest = buildWebhookManifest({
-    dataId: paymentId,
+    dataId: signatureDataId,
     xRequestId: xRequestIdValue,
     ts,
   });
