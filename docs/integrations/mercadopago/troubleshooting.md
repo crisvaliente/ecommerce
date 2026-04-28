@@ -200,3 +200,49 @@ En `src/pages/api/ecommerce/intento-pago.ts`:
 - `[intento-pago] mp response`
 - `[intento-pago] mp parsed`
 - `[intento-pago] update intento_pago`
+
+---
+
+## 11. `401 invalid_signature` en notificación legacy no bloqueante
+
+### Síntoma
+
+En logs de producción puede aparecer una request a:
+
+```txt
+/api/webhooks/mercadopago?id=...&topic=payment
+```
+
+que termina en `401 invalid_signature`.
+
+### Qué significa
+
+Mercado Pago puede enviar una notificación residual en formato legacy/IPN (`id` + `topic`) además del webhook moderno (`data.id` + `type`).
+
+En la validación actual, esa notificación legacy puede fallar firma, pero eso no impide que el webhook moderno procese el pago real.
+
+### Cómo distinguirlo de una falla real
+
+Si el circuito principal está sano, vas a ver también evidencia de:
+
+- fila en `webhook_recepcion_mp` con `estado = procesado`
+- `intento_pago.external_id` seteado
+- `intento_pago.estado = aprobado`
+- `pedido.estado = pagado`
+- logs con `payment processed`
+
+### Estado actual del proyecto
+
+Para `raeyz.com` quedó validado que:
+
+- una compra real en producción se acreditó correctamente
+- el webhook moderno procesó el pago
+- el pedido quedó consolidado como `pagado`
+
+Por eso este `401` residual se considera, por ahora, **deuda técnica no bloqueante** y no una caída del circuito principal.
+
+### Qué hacer
+
+- no confundir este `401` aislado con una falla total de Mercado Pago
+- revisar primero si existe un `payment processed` para el mismo caso
+- dejar la limpieza del canal legacy como mejora futura si el ruido en logs molesta operativamente

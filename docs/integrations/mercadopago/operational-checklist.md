@@ -142,6 +142,10 @@ Señales de alerta:
 - `payment_approved_not_consolidated`
 - `rpc_semantic_failure`
 
+### Excepción conocida
+
+En producción puede aparecer un `401 invalid_signature` asociado a una notificación legacy `?id=...&topic=payment`. Si al mismo tiempo existe un registro `procesado` en `webhook_recepcion_mp`, `payment processed` en logs y el `pedido` queda `pagado`, tratarlo como **ruido residual no bloqueante**, no como caída del circuito principal.
+
 ## 7. Regla operativa clave
 
 Si el retorno del checkout dice success pero el `pedido` sigue `pendiente_pago`, NO vendas humo. El estado canónico sigue siendo el del backend y hay que revisar webhook, correlación y consolidación.
