@@ -28,7 +28,7 @@ const Footer: React.FC = () => {
         </div>
         <div>
           <h4 className="font-semibold mb-4">Contacto</h4>
-          <p>Email: {contactEmail}</p>
+          {contactEmail && <p>Email: {contactEmail}</p>}
           {contactPhone && <p>Teléfono: <a href={`tel:${contactPhone}`} className="hover:text-primary">{contactPhone}</a></p>}
           {hasSocialLinks && (
             <div className="flex flex-wrap space-x-4 mt-4">
