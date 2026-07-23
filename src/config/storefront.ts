@@ -59,11 +59,7 @@ export const STOREFRONT_CONFIG = {
     process.env.NEXT_PUBLIC_STORE_TAGLINE,
     isProduction ? "" : SMOKE_DEFAULTS.tagline
   ),
-  contactEmail: readRequiredPublicEnv(
-    process.env.NEXT_PUBLIC_STORE_CONTACT_EMAIL,
-    "NEXT_PUBLIC_STORE_CONTACT_EMAIL",
-    SMOKE_DEFAULTS.contactEmail
-  ),
+  contactEmail: readOptionalPublicEnv(process.env.NEXT_PUBLIC_STORE_CONTACT_EMAIL),
   contactPhone: readOptionalPublicEnv(process.env.NEXT_PUBLIC_STORE_CONTACT_PHONE),
   instagramUrl: readOptionalPublicEnv(process.env.NEXT_PUBLIC_STORE_INSTAGRAM_URL),
   facebookUrl: readOptionalPublicEnv(process.env.NEXT_PUBLIC_STORE_FACEBOOK_URL),
