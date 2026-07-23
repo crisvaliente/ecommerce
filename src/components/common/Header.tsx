@@ -8,6 +8,7 @@ import { useCart } from '../ui/CartContext';
 import LoginMenu from './LoginMenu';
 import { useAuth } from '../../context/AuthContext';
 import Image from 'next/image';
+import { STOREFRONT_CONFIG } from '../../config/storefront';
 
 const Header: React.FC = () => {
   const router = useRouter();
@@ -65,7 +66,7 @@ const Header: React.FC = () => {
           <Link href="/">
             <Image
               src="/images/logo.PNG"
-              alt="Logo RÆYZ"
+              alt={`Logo ${STOREFRONT_CONFIG.name}`}
               width={40}
               height={40}
               className="h-10 w-auto"

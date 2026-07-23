@@ -6,11 +6,8 @@ import { useAuth } from "../../context/AuthContext";
 import { supabase } from "../../lib/supabaseClient";
 import { supabaseServer } from "../../lib/supabaseServer";
 import { BUCKET_PRODUCTO_IMAGENES } from "../../utils/storageProductoImagen";
+import { STOREFRONT_CONFIG } from "../../config/storefront";
 
-const STOREFRONT_TENANT =
-  process.env.NODE_ENV === "production"
-    ? { slug: "raeyz", name: "Raeyz" }
-    : { slug: "empresa-smoke", name: "EMPRESA_SMOKE" };
 const CHECKOUT_REDIRECT_DELAY_MS = 700;
 
 type ProductoEstado = "draft" | "published";
@@ -69,12 +66,6 @@ type PageProps = {
   tenantSource: "default" | "query";
 };
 
-function formatStockLabel(stock: number): string {
-  if (stock <= 0) return "Sin stock";
-  if (stock === 1) return "1 unidad disponible";
-  return `${stock} unidades disponibles`;
-}
-
 async function resolveEmpresaId(rawEmpresaId: unknown): Promise<{
   empresaId: string | null;
   tenantSource: "default" | "query";
@@ -91,7 +82,7 @@ async function resolveEmpresaId(rawEmpresaId: unknown): Promise<{
   const { data: empresaBySlug, error: slugError } = await supabaseServer
     .from("empresa")
     .select("id")
-    .eq("slug", STOREFRONT_TENANT.slug)
+    .eq("slug", STOREFRONT_CONFIG.slug)
     .maybeSingle<{ id: string }>();
 
   if (slugError) {
@@ -113,7 +104,7 @@ async function resolveEmpresaId(rawEmpresaId: unknown): Promise<{
   const { data: empresaByName, error: nameError } = await supabaseServer
     .from("empresa")
     .select("id")
-    .ilike("nombre", STOREFRONT_TENANT.name)
+    .ilike("nombre", STOREFRONT_CONFIG.name)
     .maybeSingle<{ id: string }>();
 
   if (nameError || !empresaByName?.id) {
@@ -481,7 +472,7 @@ const ColeccionPage: React.FC<
         <section className="overflow-hidden rounded-[24px] border border-stone-200 bg-gradient-to-r from-stone-950 via-stone-900 to-stone-950 px-5 py-4 text-stone-50 shadow-sm sm:px-6 sm:py-5">
           <div className="max-w-2xl">
             <p className="text-[11px] uppercase tracking-[0.28em] text-amber-200/80">
-              {STOREFRONT_TENANT.name}
+              {STOREFRONT_CONFIG.name}
             </p>
             <h1 className="mt-2 text-xl font-semibold tracking-tight sm:text-2xl">
               Coleccion disponible para compra directa.
@@ -602,7 +593,6 @@ const ColeccionPage: React.FC<
                   nombre={producto.nombre}
                   descripcion={producto.descripcion}
                   precio={producto.precio}
-                  stockLabel={formatStockLabel(producto.stock_efectivo)}
                   disponible={producto.stock_efectivo > 0}
                   canBuy={producto.stock_efectivo > 0 && producto.precio > 0}
                   imageUrl={producto.imagen_url}
