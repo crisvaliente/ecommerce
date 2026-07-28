@@ -1,5 +1,38 @@
 import type { NextConfig } from "next";
 
+const supabaseOrigin = (() => {
+  if (process.env.NODE_ENV !== "development") {
+    return null;
+  }
+
+  const rawUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+  if (!rawUrl) {
+    return null;
+  }
+
+  try {
+    const url = new URL(rawUrl);
+
+    if (
+      url.protocol !== "http:" ||
+      (url.hostname !== "127.0.0.1" && url.hostname !== "localhost")
+    ) {
+      return null;
+    }
+
+    return url.origin;
+  } catch {
+    return null;
+  }
+})();
+
+const connectSrc = ["'self'", "https:", "wss:"];
+
+if (supabaseOrigin) {
+  connectSrc.push(supabaseOrigin);
+}
+
 const contentSecurityPolicy = [
   "default-src 'self'",
   "base-uri 'self'",
@@ -10,9 +43,9 @@ const contentSecurityPolicy = [
   "font-src 'self' https: data:",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:",
   "style-src 'self' 'unsafe-inline' https:",
-  "connect-src 'self' https: wss:",
+  `connect-src ${connectSrc.join(" ")}`,
   "frame-src 'self' https://www.mercadopago.com https://*.mercadopago.com",
-  "upgrade-insecure-requests",
+  ...(process.env.NODE_ENV === "development" ? [] : ["upgrade-insecure-requests"]),
 ].join("; ");
 
 const nextConfig: NextConfig = {

@@ -110,7 +110,7 @@ export default async function handler(
 
   const { data: perfil, error: perfilErr } = await supabaseAdmin
     .from("usuario")
-    .select("empresa_id")
+    .select("empresa_id, rol")
     .eq("supabase_uid", userData.user.id)
     .maybeSingle();
 
@@ -122,6 +122,10 @@ export default async function handler(
 
   if (!perfil?.empresa_id) {
     return res.status(403).json({ error: "Usuario sin empresa asociada" });
+  }
+
+  if (!perfil.rol || !["admin", "staff"].includes(perfil.rol)) {
+    return res.status(403).json({ error: "Usuario sin permisos" });
   }
 
   try {

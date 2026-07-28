@@ -2,6 +2,7 @@
 import React from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
+import { STOREFRONT_CONFIG } from '../../config/storefront';
 
 interface RayzSectionProps {
   title?: string;
@@ -12,8 +13,8 @@ interface RayzSectionProps {
 }
 
 const RayzSection: React.FC<RayzSectionProps> = ({
-  title = "Bienvenidx a RÆYZ",
-  subtitle = "Conectá con tu estilo. Handmade & único como vos.",
+  title = `Bienvenidx a ${STOREFRONT_CONFIG.name}`,
+  subtitle = `Conectá con tu estilo. ${STOREFRONT_CONFIG.tagline}`,
   buttonText = "Ver colección",
   buttonLink = "/coleccion",
   backgroundImage = "/images/obra.png"
@@ -22,7 +23,7 @@ const RayzSection: React.FC<RayzSectionProps> = ({
     <section className="relative h-[80vh] flex items-center justify-center text-white bg-black overflow-hidden">
       <Image
         src={backgroundImage}
-        alt="Rayz Hero"
+        alt={`${STOREFRONT_CONFIG.name} Hero`}
         fill
         className="object-contain object-center opacity-100"
         priority
