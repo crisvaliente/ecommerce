@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { createClient } from "@supabase/supabase-js";
 import { applyRateLimitHeaders, checkRateLimit } from "../../../../lib/apiSecurity";
+import { authorizePanelAccess } from "../../../../lib/panelAuthorization";
 
 type PedidoEstado =
   | "pendiente_pago"
@@ -34,9 +34,9 @@ type IntentoPagoResponse = {
   canal_pago: string;
   external_id: string | null;
   preference_id?: string | null;
-   notificado_en?: string | null;
-   ultimo_evento_tipo?: string | null;
-   ultimo_evento_payload?: unknown;
+  notificado_en?: string | null;
+  ultimo_evento_tipo?: string | null;
+  ultimo_evento_payload?: unknown;
   creado_en: string;
   actualizado_en: string;
 };
@@ -60,20 +60,25 @@ type ApiOk = {
 
 type ApiErr = { error: string };
 
-function getAccessToken(req: NextApiRequest): string | null {
-  const auth = req.headers.authorization;
-  if (auth && typeof auth === "string") {
-    const m = auth.match(/^Bearer\s+(.+)$/i);
-    if (m?.[1]) return m[1].trim();
+const PANEL_ERROR_CODE_RE = /^[A-Za-z0-9_]{1,64}$/;
+
+function getAllowedErrorCode(error: unknown): string {
+  if (typeof error === "object" && error !== null) {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === "string" && PANEL_ERROR_CODE_RE.test(code)) {
+      return code;
+    }
   }
 
-  const cookie = req.headers.cookie;
-  if (cookie && typeof cookie === "string") {
-    const m = cookie.match(/(?:^|;\s*)sb-access-token=([^;]+)/);
-    if (m?.[1]) return decodeURIComponent(m[1]);
-  }
+  return "unknown_error";
+}
 
-  return null;
+function logPanelError(operation: string, error: unknown): void {
+  console.error({
+    scope: "panel.pedidos.detail",
+    operation,
+    errorCode: getAllowedErrorCode(error),
+  });
 }
 
 export default async function handler(
@@ -105,61 +110,13 @@ export default async function handler(
     return res.status(404).json({ error: "pedido_no_encontrado" });
   }
 
-  const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!SUPABASE_URL || !ANON_KEY || !SERVICE_ROLE) {
-    return res.status(500).json({ error: "server_misconfigured" });
-  }
-
   try {
-    const accessToken = getAccessToken(req);
-
-    if (!accessToken) {
-      return res.status(401).json({ error: "unauthorized" });
+    const authorization = await authorizePanelAccess(req);
+    if (authorization.ok === false) {
+      return res.status(authorization.status).json({ error: authorization.error });
     }
 
-    const supabaseAuth = createClient(SUPABASE_URL, ANON_KEY, {
-      global: {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      },
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-      },
-    });
-
-    const { data: userData, error: userErr } = await supabaseAuth.auth.getUser();
-
-    if (userErr || !userData?.user) {
-      return res.status(401).json({ error: "unauthorized" });
-    }
-
-    const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_ROLE);
-
-    const { data: perfil, error: perfilErr } = await supabaseAdmin
-      .from("usuario")
-      .select("empresa_id, rol")
-      .eq("supabase_uid", userData.user.id)
-      .maybeSingle();
-
-    if (perfilErr) {
-      console.error("[GET /api/panel/pedidos/:id] perfilErr", perfilErr);
-      return res.status(500).json({ error: "internal_error" });
-    }
-
-    if (!perfil?.empresa_id) {
-      return res.status(403).json({ error: "forbidden" });
-    }
-
-    if (!perfil.rol || !["admin", "staff"].includes(perfil.rol)) {
-      return res.status(403).json({ error: "forbidden" });
-    }
-
-    const { data: pedido, error: pedidoErr } = await supabaseAdmin
+    const { data: pedido, error: pedidoErr } = await authorization.supabaseAdmin
       .from("pedido")
       .select(
         `
@@ -176,11 +133,11 @@ export default async function handler(
         `
       )
       .eq("id", pedidoIdTrimmed)
-      .eq("empresa_id", perfil.empresa_id)
+      .eq("empresa_id", authorization.empresaId)
       .maybeSingle();
 
     if (pedidoErr) {
-      console.error("[GET /api/panel/pedidos/:id] pedidoErr", pedidoErr);
+      logPanelError("pedido_lookup", pedidoErr);
       return res.status(500).json({ error: "internal_error" });
     }
 
@@ -188,7 +145,7 @@ export default async function handler(
       return res.status(404).json({ error: "pedido_no_encontrado" });
     }
 
-    const { data: items, error: itemsErr } = await supabaseAdmin
+    const { data: items, error: itemsErr } = await authorization.supabaseAdmin
       .from("pedido_item")
       .select(
         `
@@ -205,10 +162,10 @@ export default async function handler(
       .eq("empresa_id", pedido.empresa_id);
 
     if (itemsErr) {
-      console.error("[GET /api/panel/pedidos/:id] itemsErr", itemsErr);
+      logPanelError("pedido_items_lookup", itemsErr);
     }
 
-    const { data: intentosPago, error: intentoPagoErr } = await supabaseAdmin
+    const { data: intentosPago, error: intentoPagoErr } = await authorization.supabaseAdmin
       .from("intento_pago")
       .select(
         "id, estado, canal_pago, external_id, preference_id, notificado_en, ultimo_evento_tipo, ultimo_evento_payload, creado_en, actualizado_en"
@@ -219,10 +176,7 @@ export default async function handler(
       .order("id", { ascending: false });
 
     if (intentoPagoErr) {
-      console.error(
-        "[GET /api/panel/pedidos/:id] intentoPagoErr",
-        intentoPagoErr
-      );
+      logPanelError("payment_attempt_lookup", intentoPagoErr);
     }
 
     const intentosPagoRows = !intentoPagoErr ? intentosPago ?? [] : [];
@@ -281,7 +235,7 @@ export default async function handler(
       },
     });
   } catch (error) {
-    console.error("[GET /api/panel/pedidos/:id] unexpected", error);
+    logPanelError("unexpected_failure", error);
     return res.status(500).json({ error: "internal_error" });
   }
 }
