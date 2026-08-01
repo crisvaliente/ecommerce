@@ -110,12 +110,12 @@ export default async function handler(
     return res.status(404).json({ error: "pedido_no_encontrado" });
   }
 
-  try {
-    const authorization = await authorizePanelAccess(req);
-    if (authorization.ok === false) {
-      return res.status(authorization.status).json({ error: authorization.error });
-    }
+  const authorization = await authorizePanelAccess(req);
+  if (authorization.ok === false) {
+    return res.status(authorization.status).json({ error: authorization.error });
+  }
 
+  try {
     const { data: pedido, error: pedidoErr } = await authorization.supabaseAdmin
       .from("pedido")
       .select(

@@ -52,10 +52,18 @@ function parseAccessToken(req: NextApiRequest):
   | PanelAuthorizationFailure {
   const authorizationHeader = req.headers.authorization;
 
-  const headerValue = getSingleHeaderValue(authorizationHeader);
-  const bearerMatch = headerValue?.match(/^Bearer ([^\s]+)$/i);
-  if (bearerMatch) {
-    return { ok: true, token: bearerMatch[1] };
+  if (authorizationHeader !== undefined) {
+    const headerValue = getSingleHeaderValue(authorizationHeader);
+    if (!headerValue || !headerValue.startsWith("Bearer ")) {
+      return unauthorized();
+    }
+
+    const token = headerValue.slice("Bearer ".length);
+    if (!token || token.trim() !== token || /\s/.test(token)) {
+      return unauthorized();
+    }
+
+    return { ok: true, token };
   }
 
   const cookieHeader = getSingleHeaderValue(req.headers.cookie);
