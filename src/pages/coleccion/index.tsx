@@ -1,9 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 import type { GetServerSideProps, InferGetServerSidePropsType } from "next";
-import Link from "next/link";
 import ProductCard from "../../components/ui/ProductCard";
-import { useAuth } from "../../context/AuthContext";
-import { supabase } from "../../lib/supabaseClient";
+import { useCart } from "../../components/ui/CartContext";
 import { supabaseServer } from "../../lib/supabaseServer";
 import { BUCKET_PRODUCTO_IMAGENES } from "../../utils/storageProductoImagen";
 
@@ -11,8 +9,6 @@ const STOREFRONT_TENANT =
   process.env.NODE_ENV === "production"
     ? { slug: "raeyz", name: "Raeyz" }
     : { slug: "empresa-smoke", name: "EMPRESA_SMOKE" };
-const CHECKOUT_REDIRECT_DELAY_MS = 700;
-
 type ProductoEstado = "draft" | "published";
 
 type ProductoRow = {
@@ -294,185 +290,38 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (
 const ColeccionPage: React.FC<
   InferGetServerSidePropsType<typeof getServerSideProps>
 > = ({ empresaId, productos, error, tenantSource }) => {
-  const { sessionUser, dbUser } = useAuth();
-  const [creatingFor, setCreatingFor] = useState<string | null>(null);
-  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const { addItem, empresaId: cartEmpresaId } = useCart();
   const [selectedVarianteByProducto, setSelectedVarianteByProducto] = useState<
     Record<string, string>
   >({});
-  const [hasAddress, setHasAddress] = useState<boolean | null>(null);
-  const [intentoResult, setIntentoResult] = useState<{
-    id: string;
-    pedido_id: string;
-    estado: string;
-    preference_id: string;
-    init_point: string;
-  } | null>(null);
+  const cartBelongsToAnotherCompany =
+    cartEmpresaId !== null && cartEmpresaId !== empresaId;
 
-  const canCreatePedido = useMemo(() => {
-    return Boolean(sessionUser && dbUser?.id && empresaId);
-  }, [dbUser?.id, empresaId, sessionUser]);
-
-  const isRedirectingToCheckout = Boolean(intentoResult && !creatingFor);
-
-  const getCheckoutErrorMessage = (code: string | null) => {
-    switch (code) {
-      case "direccion_envio_no_disponible":
-        return "Agregá una dirección en tu cuenta para poder continuar con la compra.";
-      case "direccion_no_existe":
-      case "direccion_no_pertenece_al_usuario":
-        return "No pudimos usar tu dirección guardada. Probá actualizarla y volvé a intentar.";
-      case "pedido_expirado":
-      case "pedido_bloqueado":
-      case "pedido_no_pagable":
-        return "Este pedido ya no se puede pagar. Probá iniciar la compra nuevamente.";
-      case "mercadopago_preference_error":
-        return "No pudimos abrir el checkout ahora. Probá nuevamente en unos segundos.";
-      case "unauthorized":
-        return "Necesitás iniciar sesión para continuar con la compra.";
-      case "variante_sin_stock":
-        return "La variante seleccionada ya no tiene stock. Elegi otra talla.";
-      default:
-        return "No pudimos iniciar la compra en este momento. Probá nuevamente.";
-    }
-  };
-
-  const ensureUserHasAddress = async () => {
-    if (!dbUser?.id) {
-      return false;
-    }
-
-    const { count, error } = await supabase
-      .from("direccion_usuario")
-      .select("id", { count: "exact", head: true })
-      .eq("usuario_id", dbUser.id);
-
-    if (error) {
-      throw error;
-    }
-
-    const available = (count ?? 0) > 0;
-    setHasAddress(available);
-    return available;
-  };
-
-  const handleComprar = async (
+  const handleAgregarAlCarrito = (
     producto: ProductoStorefront,
     varianteId?: string | null
   ) => {
-    if (!canCreatePedido || !dbUser?.id || !empresaId) {
-      setCheckoutError("Necesitás iniciar sesión para continuar con la compra.");
+    if (!empresaId || producto.precio <= 0) {
       return;
     }
 
-    if (producto.precio <= 0) {
-      setCheckoutError("Este producto no esta disponible para compra en este momento.");
+    const varianteSeleccionada = producto.usa_variantes
+      ? producto.variantes.find((variante) => variante.variante_id === varianteId)
+      : null;
+
+    if (producto.usa_variantes && !varianteSeleccionada) {
       return;
     }
 
-    if (producto.usa_variantes && !varianteId) {
-      setCheckoutError("Elegí un talle disponible para continuar con la compra.");
-      return;
-    }
-
-    if (producto.usa_variantes && varianteId) {
-      const varianteValida = producto.variantes.some((variante) => variante.variante_id === varianteId);
-
-      if (!varianteValida) {
-        setCheckoutError("Elegí un talle disponible para continuar con la compra.");
-        return;
-      }
-    }
-
-    setCreatingFor(producto.producto_id);
-    setCheckoutError(null);
-    setIntentoResult(null);
-
-    try {
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.getSession();
-
-      const accessToken = session?.access_token ?? null;
-
-      if (sessionError || !accessToken) {
-        setCheckoutError(getCheckoutErrorMessage("unauthorized"));
-        return;
-      }
-
-      const addressAvailable = await ensureUserHasAddress();
-
-      if (!addressAvailable) {
-        setCheckoutError("Agrega una direccion en tu cuenta para poder continuar con la compra.");
-        return;
-      }
-
-      const pedidoResponse = await fetch("/api/ecommerce/pedido", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({
-          empresa_id: empresaId,
-          items: [
-            {
-              producto_id: producto.producto_id,
-              variante_id: producto.usa_variantes ? varianteId : undefined,
-              cantidad: 1,
-            },
-          ],
-        }),
-      });
-
-      const pedidoBody = (await pedidoResponse.json().catch(() => null)) as
-        | { pedido_id?: string; error?: string }
-        | null;
-
-      if (!pedidoResponse.ok || !pedidoBody?.pedido_id) {
-        setCheckoutError(getCheckoutErrorMessage(pedidoBody?.error ?? null));
-        return;
-      }
-
-      const intentoResponse = await fetch("/api/ecommerce/intento-pago", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({
-          pedido_id: pedidoBody.pedido_id,
-        }),
-      });
-
-      const intentoBody = (await intentoResponse.json().catch(() => null)) as
-        | {
-            intento_pago?: {
-              id: string;
-              pedido_id: string;
-              estado: string;
-              preference_id: string;
-              init_point: string;
-            };
-            error?: string;
-          }
-        | null;
-
-      if (!intentoResponse.ok || !intentoBody?.intento_pago) {
-        setCheckoutError(getCheckoutErrorMessage(intentoBody?.error ?? null));
-        return;
-      }
-
-      setIntentoResult(intentoBody.intento_pago);
-      await new Promise((resolve) => setTimeout(resolve, CHECKOUT_REDIRECT_DELAY_MS));
-      window.location.assign(intentoBody.intento_pago.init_point);
-    } catch (err) {
-      console.error(err);
-      setCheckoutError(getCheckoutErrorMessage(null));
-    } finally {
-      setCreatingFor(null);
-    }
+    addItem(empresaId, {
+      productoId: producto.producto_id,
+      varianteId: varianteSeleccionada?.variante_id ?? null,
+      name: varianteSeleccionada
+        ? `${producto.nombre} - Talle ${varianteSeleccionada.talle}`
+        : producto.nombre,
+      price: producto.precio,
+      image: "/images/logo.PNG",
+    });
   };
 
   return (
@@ -484,10 +333,10 @@ const ColeccionPage: React.FC<
               {STOREFRONT_TENANT.name}
             </p>
             <h1 className="mt-2 text-xl font-semibold tracking-tight sm:text-2xl">
-              Coleccion disponible para compra directa.
+              Coleccion disponible para agregar al carrito.
             </h1>
             <p className="mt-2 max-w-xl text-sm leading-5 text-stone-300">
-              Elegi un producto disponible y segui al checkout con tu cuenta.
+              Elegi un producto disponible y prepara tu carrito.
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-2 text-xs sm:text-sm">
               {tenantSource === "query" && (
@@ -499,89 +348,27 @@ const ColeccionPage: React.FC<
           </div>
         </section>
 
-        <section className="mt-4 rounded-[22px] border border-stone-200 bg-white p-4 shadow-sm sm:p-5">
-          {!empresaId && error === "storefront_tenant_not_found" && (
+        {!empresaId && error === "storefront_tenant_not_found" && (
+          <section className="mt-4 rounded-[22px] border border-stone-200 bg-white p-4 shadow-sm sm:p-5">
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
               <p className="font-medium">La tienda no esta disponible ahora.</p>
               <p className="mt-1 text-amber-800">
                 Probá nuevamente en unos minutos.
               </p>
             </div>
-          )}
+          </section>
+        )}
 
-          {empresaId && error === "product_read_failed" && (
+        {empresaId && error === "product_read_failed" && (
+          <section className="mt-4 rounded-[22px] border border-stone-200 bg-white p-4 shadow-sm sm:p-5">
             <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-900">
               <p className="font-medium">No pudimos cargar la coleccion ahora.</p>
               <p className="mt-1 text-rose-800">
                 Actualiza la pagina o volve a intentar en unos minutos.
               </p>
             </div>
-          )}
-
-          {empresaId && !error && (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-stone-50 px-4 py-3">
-              <div>
-                <p className="text-sm font-medium text-stone-900">
-                  {canCreatePedido
-                    ? `Comprando como ${dbUser?.correo ?? "tu cuenta"}`
-                    : "Inicia sesion para comprar de forma segura"}
-                </p>
-                <p className="mt-1 text-xs text-stone-600 sm:text-sm">
-                  {canCreatePedido
-                    ? "Armamos tu pedido y te llevamos directo a Mercado Pago para completar el pago."
-                    : "Necesitas una cuenta con una direccion guardada para avanzar al checkout."}
-                </p>
-              {canCreatePedido && hasAddress === false && (
-                  <div className="mt-2 text-xs text-rose-700 sm:text-sm">
-                    <p>Antes de comprar, necesitas guardar una direccion en tu cuenta.</p>
-                    <Link href="/mi-cuenta" className="mt-1 inline-flex font-medium underline">
-                      Ir a Mi Cuenta
-                    </Link>
-                  </div>
-                )}
-              </div>
-
-              {!canCreatePedido && (
-                <Link
-                  href="/auth/login"
-                  className="rounded-full bg-stone-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-stone-700"
-                >
-                  Iniciar sesion
-                </Link>
-              )}
-            </div>
-          )}
-
-          {creatingFor && (
-            <div className="mt-4 rounded-2xl border border-stone-200 bg-[#EEECE1] px-4 py-4 text-sm text-stone-900">
-              <p className="font-medium">Estamos preparando tu compra.</p>
-              <p className="mt-1 text-stone-700">
-                En unos segundos te redirigimos a Mercado Pago para completar el pago.
-              </p>
-            </div>
-          )}
-
-          {checkoutError && (
-            <p className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
-              {checkoutError}
-            </p>
-          )}
-
-          {isRedirectingToCheckout && (
-            <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-              Tu pago ya esta listo. Si Mercado Pago no se abre automaticamente, usa este{" "}
-              <a
-                href={intentoResult.init_point}
-                target="_blank"
-                rel="noreferrer"
-                className="font-medium underline"
-              >
-                enlace de pago
-              </a>
-              .
-            </div>
-          )}
-        </section>
+          </section>
+        )}
 
         {empresaId && !error && productos.length === 0 && (
           <section className="mt-5 rounded-[28px] border border-stone-200 bg-white p-6 text-center shadow-sm">
@@ -611,42 +398,35 @@ const ColeccionPage: React.FC<
                     producto.precio <= 0
                       ? "Este producto no esta disponible para compra en este momento."
                       : producto.stock_efectivo <= 0
-                      ? "Este producto volvera a estar disponible cuando repongamos stock."
-                      : producto.usa_variantes
-                        ? "Elegi un talle disponible para continuar con la compra."
-                        : canCreatePedido
-                          ? "Vas a completar el pago en Mercado Pago, sin pasos intermedios."
-                          : "Inicia sesion para continuar con una compra segura."
+                        ? "Este producto volvera a estar disponible cuando repongamos stock."
+                        : cartBelongsToAnotherCompany
+                          ? "Vacia el carrito de la otra tienda antes de agregar este producto."
+                          : producto.usa_variantes
+                            ? "Elegi un talle disponible para agregarlo al carrito."
+                            : "Agrega este producto al carrito para continuar comprando."
                   }
-                  action={
-                    canCreatePedido
-                      ? {
-                          label:
-                            creatingFor === producto.producto_id
-                              ? "Preparando tu pago..."
-                              : producto.usa_variantes &&
-                                  !selectedVarianteByProducto[producto.producto_id]
-                                ? "Elegir talle"
-                                : "Comprar ahora",
-                          onClick: () =>
-                            handleComprar(
-                              producto,
-                              producto.usa_variantes
-                                ? selectedVarianteByProducto[producto.producto_id] ?? null
-                                : null
-                            ),
-                          disabled:
-                            producto.precio <= 0 ||
-                            producto.stock_efectivo <= 0 ||
-                            creatingFor === producto.producto_id ||
-                            (producto.usa_variantes &&
-                              !selectedVarianteByProducto[producto.producto_id]),
-                        }
-                      : {
-                          label: "Iniciar sesion para comprar",
-                          href: "/auth/login",
-                        }
-                  }
+                  action={{
+                    label:
+                      cartBelongsToAnotherCompany
+                        ? "Carrito de otra tienda"
+                        : producto.usa_variantes &&
+                            !selectedVarianteByProducto[producto.producto_id]
+                          ? "Elegir talle"
+                          : "Agregar al carrito",
+                    onClick: () =>
+                      handleAgregarAlCarrito(
+                        producto,
+                        producto.usa_variantes
+                          ? selectedVarianteByProducto[producto.producto_id] ?? null
+                          : null
+                      ),
+                    disabled:
+                      producto.precio <= 0 ||
+                      producto.stock_efectivo <= 0 ||
+                      cartBelongsToAnotherCompany ||
+                      (producto.usa_variantes &&
+                        !selectedVarianteByProducto[producto.producto_id]),
+                  }}
                 />
 
                 {producto.usa_variantes && (
@@ -662,9 +442,8 @@ const ColeccionPage: React.FC<
                           ...prev,
                           [producto.producto_id]: event.target.value,
                         }));
-                        setCheckoutError(null);
                       }}
-                      disabled={producto.stock_efectivo <= 0 || creatingFor === producto.producto_id}
+                      disabled={producto.stock_efectivo <= 0}
                       className="w-full rounded-full border border-stone-300 bg-white px-4 py-3 text-sm text-stone-900 outline-none transition focus:border-stone-500 disabled:cursor-not-allowed disabled:bg-stone-100"
                     >
                       <option value="">Elegi un talle</option>
