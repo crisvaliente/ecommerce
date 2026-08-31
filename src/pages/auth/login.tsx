@@ -21,44 +21,14 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [bootstrapping, setBootstrapping] = useState(false);
 
   const go = (path: string) => router.push(path);
 
-  // --- Helper: asegura org personal y guarda activeOrgId ---
-  const ensureAndSetActiveOrg = async (): Promise<string> => {
-    const existing =
-      typeof window !== "undefined"
-        ? localStorage.getItem("activeOrgId")
-        : null;
-    if (existing) return existing;
-
-    const { data, error } = await supabase.rpc("ensure_personal_org");
-    if (error) throw error;
-
-    const orgId = data?.[0]?.empresa_id as string | undefined;
-    if (!orgId) throw new Error("No se pudo determinar empresa activa");
-    localStorage.setItem("activeOrgId", orgId);
-    return orgId;
-  };
-
-  // --- Si ya hay sesión, bootstrap multitenant y redirige ---
   useEffect(() => {
-    if (!authLoading && sessionUser && !bootstrapping) {
-      setBootstrapping(true);
-      (async () => {
-        try {
-          await ensureAndSetActiveOrg();
-        } catch (e: unknown) {
-          console.error(e);
-          setErrorMsg(getErrorMessage(e) ?? "Error inicializando empresa");
-        } finally {
-          router.replace("/debug/auth"); // TODO: cambiar a "/panel" o lo que definas
-          setBootstrapping(false);
-        }
-      })();
+    if (!authLoading && sessionUser) {
+      router.replace("/debug/auth"); // TODO: cambiar a "/panel" o lo que definas
     }
-  }, [authLoading, sessionUser, router, bootstrapping]);
+  }, [authLoading, sessionUser, router]);
 
   // --- Login con email/clave ---
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -109,7 +79,7 @@ export default function LoginPage() {
     }
   };
 
-  if (authLoading || bootstrapping) {
+  if (authLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
         <p className="text-gray-500">Cargando autenticación…</p>
