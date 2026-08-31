@@ -1,33 +1,63 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Ecommerce
 
-## Getting Started
+Next.js application backed by Supabase.
 
-First, run the development server:
+## Local baseline
+
+Use only credentials from the local Supabase stack. Never copy hosted credentials into the local environment.
+
+1. Install the locked dependencies:
+
+   ```bash
+   pnpm install --frozen-lockfile
+   ```
+
+2. Start Supabase locally:
+
+   ```bash
+   pnpm exec supabase start
+   ```
+
+3. Rebuild the local database from migrations and seed data:
+
+   ```bash
+   pnpm exec supabase db reset --local
+   ```
+
+4. Create the local environment file:
+
+   ```bash
+   cp local-env.sample .env.local
+   pnpm exec supabase status -o env
+   ```
+
+   Complete `.env.local` with the local values reported by Supabase. Map `API_URL`, `ANON_KEY`, and `SERVICE_ROLE_KEY` to the variable names already present in the sample.
+
+5. Bootstrap the local smoke users:
+
+   ```bash
+   pnpm smoke:bootstrap
+   ```
+
+6. Run static validation:
+
+   ```bash
+   pnpm lint
+   ```
+
+7. Build the application:
+
+   ```bash
+   pnpm build
+   ```
+
+To run the development server afterward:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-## Supabase local
-
-This repo has a local Supabase config in `supabase/config.toml`.
-
-- For local development, `NEXT_PUBLIC_SUPABASE_URL` should point to `http://127.0.0.1:55491`.
-- The anon and service role keys must come from your local Supabase stack, not from the hosted project.
-- The current `.env.local` in this workspace still points to the hosted project, so update it before testing the local auth flow.
-- Local email confirmation is disabled (`auth.email.enable_confirmations = false`), so sign-up should create an active session right away.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Open [http://localhost:3000](http://localhost:3000).
 
 ## Learn More
 

@@ -2,11 +2,12 @@
   "name": "ecommerce",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@10.2.1",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "smoke:bootstrap": "node scripts/bootstrap-smoke-users.mjs"
   },
   "dependencies": {

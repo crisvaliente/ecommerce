@@ -33,7 +33,6 @@ const ProductCard: React.FC<ProductCardProps> = ({
   nombre,
   descripcion,
   precio,
-  stockLabel,
   disponible,
   canBuy = true,
   imageUrl,

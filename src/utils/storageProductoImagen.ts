@@ -72,6 +72,9 @@ export function buildProductoImagenPathCanonical(args: {
  * Si algún lugar lo sigue usando, va a tirar error con mensaje claro.
  */
 export function buildProductoImagenPath(productoId: string, ext: string): string {
+  void productoId;
+  void ext;
+
   // Mantengo firma vieja, pero no puedo construir canonical sin empresaId.
   throw new Error(
     "buildProductoImagenPath(productoId, ext) quedó obsoleto en B2. Usá buildProductoImagenPathCanonical({ empresaId, productoId, imagenId, ext })."
