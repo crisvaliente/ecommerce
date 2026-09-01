@@ -2,6 +2,21 @@ import type { NextConfig } from "next";
 import { parseAppBaseUrl } from "./src/config/instance";
 
 const appBaseUrl = parseAppBaseUrl(process.env.APP_BASE_URL);
+const appUsesHttps = new URL(appBaseUrl).protocol === "https:";
+const supabaseLocalConnectOrigin = (() => {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!supabaseUrl || appUsesHttps) return null;
+
+  try {
+    const url = new URL(supabaseUrl);
+    return url.protocol === "http:" ? url.origin : null;
+  } catch {
+    return null;
+  }
+})();
+const connectSources = ["'self'", "https:", "wss:", supabaseLocalConnectOrigin]
+  .filter((source): source is string => Boolean(source))
+  .join(" ");
 
 const contentSecurityPolicy = [
   "default-src 'self'",
@@ -13,9 +28,9 @@ const contentSecurityPolicy = [
   "font-src 'self' https: data:",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:",
   "style-src 'self' 'unsafe-inline' https:",
-  "connect-src 'self' https: wss:",
+  `connect-src ${connectSources}`,
   "frame-src 'self' https://www.mercadopago.com https://*.mercadopago.com",
-  "upgrade-insecure-requests",
+  ...(appUsesHttps ? ["upgrade-insecure-requests"] : []),
 ].join("; ");
 
 const nextConfig: NextConfig = {
