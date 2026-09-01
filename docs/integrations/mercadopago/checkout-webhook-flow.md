@@ -13,7 +13,19 @@ El retorno del navegador (`/checkout/resultado`) es solo una señal de UX. NO de
 
 ### 1) Usuario inicia compra
 
-Desde `src/pages/coleccion/index.tsx`, si el usuario tiene sesión y dirección válida, la UI crea el pedido y luego abre el checkout de Mercado Pago.
+La apertura backend crea el pedido antes de abrir Mercado Pago. Cuando la UI productiva
+se conecte a `POST /api/ecommerce/pedido`, deberá enviar `Idempotency-Key` con un UUID
+generado para esa intención de compra. La API
+calcula un fingerprint canónico del payload y la wrapper transaccional persiste el mapping
+`(usuario_id, idempotency_key) -> pedido_id`.
+
+- misma key y mismo fingerprint: devuelve el mismo pedido con `reutilizado: true`
+- misma key y fingerprint diferente: `409 idempotency_key_reused`
+- creación original fallida: la transacción revierte pedido y mapping
+- respuesta HTTP perdida después del commit: el retry recupera el pedido original
+
+La RPC de negocio `crear_pedido_con_items` permanece sin cambios; la wrapper agrega la
+frontera de idempotencia y serializa la misma key mediante advisory lock transaccional.
 
 ### 2) API crea o reutiliza intento interno
 
@@ -52,16 +64,40 @@ Payload relevante:
 - `items[0].id = pedido.id`
 - `items[0].unit_price = pedido.total`
 
-Si Mercado Pago responde bien:
+`POST /checkout/preferences` no declara `X-Idempotency-Key` como contrato soportado.
+Por eso el correctness del bridge depende de un claim local y de `external_reference`,
+no de deduplicación supuesta del proveedor.
 
-- se guarda `preference_id` en `intento_pago`
-- se devuelve `201` con `intento_pago.id`, `pedido_id`, `preference_id` e `init_point`
+El estado `preference_creation_state` permanece separado de `intento_pago.estado`:
 
-Si la creación de la preference falla:
+- `not_started`: todavía se puede reclamar el único POST automático
+- `creating`: un request ya reclamó el POST
+- `ready`: `preference_id + preference_init_point` están persistidos
+- `ambiguous`: el POST pudo haber llegado; sólo se permite reconciliar
+- `failed`: hubo una respuesta concluyente de error; no se reintenta automáticamente
 
-- el intento interno queda en `iniciado`
-- la API responde `502 mercadopago_preference_error`
-- el diseño actual permite reintentar la apertura del bridge sin compensación automática
+Antes de crear, el bridge reutiliza `preference_id + preference_init_point`. Si existe
+sólo `preference_id`, recupera esa preference por ID y valida identidad, pedido, item,
+moneda, total, expiración y utilizabilidad; nunca crea otra como fallback.
+
+Sólo un CAS atómico `not_started -> creating` habilita `POST /checkout/preferences`.
+Requests concurrentes no emiten POST. Si el POST o su validación quedan ambiguos, el
+estado pasa a `ambiguous` y la reconciliación usa la búsqueda oficial por
+`external_reference = intento_pago.id`, recorriendo toda la paginación. Exactamente un
+candidato debe pasar luego un GET y la validación completa antes de persistirse como
+`ready`.
+
+Cero candidatos, múltiples candidatos, una preference incompatible o una búsqueda
+inconclusa mantienen el bridge fail-closed. Un `creating` stale también se reconcilia:
+nunca vuelve automáticamente a `not_started` y nunca emite un segundo POST.
+
+#### Límite de garantía del proveedor
+
+El bridge puede afirmar que la aplicación inicia como máximo un POST automático por
+`intento_pago` y que no reintenta el POST después de incertidumbre. No afirma exactly-once
+entre PostgreSQL y Mercado Pago, ni que una búsqueda sin resultados demuestre que la
+preference nunca existió. Los estados ambiguos pueden requerir reconciliación posterior
+o intervención operativa.
 
 ### 4) Usuario completa checkout en Mercado Pago
 

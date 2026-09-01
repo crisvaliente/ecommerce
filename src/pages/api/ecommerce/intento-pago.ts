@@ -8,6 +8,17 @@ import {
   isOriginValidationFailure,
   validateTrustedOrigin,
 } from "../../../lib/apiSecurity";
+import {
+  assertPreferenceMatchesPersisted,
+  createMercadoPagoPreference,
+  getPreferenceResolutionMode,
+  MercadoPagoBridgeError,
+  reconcileMercadoPagoPreference,
+  recoverMercadoPagoPreference,
+  type ExpectedMercadoPagoPreference,
+  type MercadoPagoPreference,
+  type PreferenceBridgeState,
+} from "../../../lib/mercadoPagoPreference";
 
 type RpcRow = {
   ok: boolean;
@@ -23,10 +34,13 @@ type PedidoRow = {
   expira_en: string | null;
 };
 
-type PreferenceCreateResponse = {
+type IntentoPreferenceRow = {
   id: string;
-  init_point: string | null;
-  sandbox_init_point?: string | null;
+  preference_id: string | null;
+  preference_init_point: string | null;
+  preference_creation_state: PreferenceBridgeState;
+  preference_creation_started_at: string | null;
+  preference_last_error: string | null;
 };
 
 type ApiOk = {
@@ -102,6 +116,15 @@ function buildCheckoutResultUrl(params: {
   return url.toString();
 }
 
+const PREFERENCE_SELECT =
+  "id, preference_id, preference_init_point, preference_creation_state, preference_creation_started_at, preference_last_error";
+
+function preferenceErrorCode(error: unknown): string {
+  return error instanceof MercadoPagoBridgeError
+    ? error.message.slice(0, 100)
+    : "mercadopago_preference_error";
+}
+
 function toAmount(value: number | string | null): number | null {
   if (typeof value === "number" && Number.isFinite(value) && value > 0) {
     return value;
@@ -115,50 +138,6 @@ function toAmount(value: number | string | null): number | null {
   }
 
   return null;
-}
-
-async function createMercadoPagoPreference(params: {
-  accessToken: string;
-  externalReference: string;
-  pedidoId: string;
-  total: number;
-  notificationUrl: string;
-  dateOfExpiration: string;
-  backUrls: {
-    success: string;
-    failure: string;
-    pending: string;
-  };
-}): Promise<PreferenceCreateResponse> {
-  const response = await fetch("https://api.mercadopago.com/checkout/preferences", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${params.accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      external_reference: params.externalReference,
-      notification_url: params.notificationUrl,
-      expires: true,
-      date_of_expiration: params.dateOfExpiration,
-      back_urls: params.backUrls,
-      items: [
-        {
-          id: params.pedidoId,
-          title: `Pedido ${params.pedidoId}`,
-          quantity: 1,
-          unit_price: params.total,
-          currency_id: "UYU",
-        },
-      ],
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error("mercadopago_preference_error");
-  }
-
-  return (await response.json()) as PreferenceCreateResponse;
 }
 
 export default async function handler(
@@ -320,60 +299,222 @@ export default async function handler(
     }),
   };
 
-  let preference: PreferenceCreateResponse;
+  const expectedPreference: ExpectedMercadoPagoPreference = {
+    intentoPagoId: row.intento_pago_id,
+    pedidoId: row.pedido_id,
+    total,
+    dateOfExpiration: expiraEn,
+  };
 
+  const readPreferenceState = async (): Promise<IntentoPreferenceRow | null> => {
+    const { data, error } = await serviceClient
+      .from("intento_pago")
+      .select(PREFERENCE_SELECT)
+      .eq("id", row.intento_pago_id)
+      .single();
+    return error || !data?.id ? null : (data as IntentoPreferenceRow);
+  };
+
+  const markBridgeState = async (
+    state: PreferenceBridgeState,
+    allowedStates: PreferenceBridgeState[],
+    errorCode: string | null,
+  ): Promise<void> => {
+    const { error } = await serviceClient
+      .from("intento_pago")
+      .update({
+        preference_creation_state: state,
+        preference_last_error: errorCode,
+      })
+      .eq("id", row.intento_pago_id)
+      .in("preference_creation_state", allowedStates);
+    if (error) {
+      console.error("[intento-pago] bridge state update failed", {
+        intento_pago_id: row.intento_pago_id,
+        target_state: state,
+        error,
+      });
+    }
+  };
+
+  const persistReadyPreference = async (
+    preference: MercadoPagoPreference,
+    mode: "new" | "recover",
+  ): Promise<IntentoPreferenceRow> => {
+    const query = mode === "recover"
+      ? serviceClient
+          .from("intento_pago")
+          .update({
+            preference_init_point: preference.init_point,
+            preference_creation_state: "ready",
+            preference_last_error: null,
+          })
+          .eq("id", row.intento_pago_id)
+          .eq("preference_id", preference.id)
+          .is("preference_init_point", null)
+      : serviceClient
+          .from("intento_pago")
+          .update({
+            preference_id: preference.id,
+            preference_init_point: preference.init_point,
+            preference_creation_state: "ready",
+            preference_last_error: null,
+          })
+          .eq("id", row.intento_pago_id)
+          .is("preference_id", null)
+          .in("preference_creation_state", ["creating", "ambiguous"]);
+
+    const { data, error } = await query.select(PREFERENCE_SELECT).maybeSingle();
+    if (error) throw new Error("preference_persistence_failed");
+
+    const finalState = data?.id
+      ? (data as IntentoPreferenceRow)
+      : await readPreferenceState();
+    if (!finalState) throw new Error("preference_persistence_failed");
+    assertPreferenceMatchesPersisted(preference, finalState);
+    return finalState;
+  };
+
+  let intento = await readPreferenceState();
+  if (!intento) return res.status(500).json({ error: "unexpected_error" });
+
+  let mode: ReturnType<typeof getPreferenceResolutionMode>;
   try {
-    preference = await createMercadoPagoPreference({
-      accessToken: MP_ACCESS_TOKEN,
-      externalReference: row.intento_pago_id,
-      pedidoId: row.pedido_id,
-      total,
-      notificationUrl,
-      dateOfExpiration: expiraEn,
-      backUrls,
-    });
-    console.log("[intento-pago] mp response", {
-      ok: true,
-      body: preference,
-    });
+    mode = getPreferenceResolutionMode(intento);
   } catch {
-    console.error("[intento-pago] mp response", {
-      ok: false,
-      body: null,
-    });
-    // El intento interno ya existe y queda en "iniciado".
-    // En v1 no compensamos: permitimos reintentar la apertura del bridge.
+    return res.status(409).json({ error: "mercadopago_preference_conflict" });
+  }
+
+  if (mode === "claim") {
+    const startedAt = new Date().toISOString();
+    const { data: claimed, error: claimError } = await serviceClient
+      .from("intento_pago")
+      .update({
+        preference_creation_state: "creating",
+        preference_creation_started_at: startedAt,
+        preference_last_error: null,
+      })
+      .eq("id", row.intento_pago_id)
+      .eq("preference_creation_state", "not_started")
+      .is("preference_id", null)
+      .select(PREFERENCE_SELECT)
+      .maybeSingle();
+
+    if (claimError) return res.status(500).json({ error: "unexpected_error" });
+    if (claimed?.id) {
+      intento = claimed as IntentoPreferenceRow;
+      mode = "claim";
+    } else {
+      intento = await readPreferenceState();
+      if (!intento) return res.status(500).json({ error: "unexpected_error" });
+      try {
+        mode = getPreferenceResolutionMode(intento);
+      } catch {
+        return res.status(409).json({ error: "mercadopago_preference_conflict" });
+      }
+    }
+  }
+
+  if (mode === "in_progress") {
+    res.setHeader("Retry-After", "2");
+    return res.status(503).json({ error: "mercadopago_preference_in_progress" });
+  }
+
+  if (mode === "failed") {
     return res.status(502).json({ error: "mercadopago_preference_error" });
   }
 
-  const initPoint = preference.init_point ?? preference.sandbox_init_point ?? null;
+  if (mode === "reuse") {
+    if (intento.preference_creation_state !== "ready") {
+      const { data: normalized, error } = await serviceClient
+        .from("intento_pago")
+        .update({ preference_creation_state: "ready", preference_last_error: null })
+        .eq("id", row.intento_pago_id)
+        .eq("preference_id", intento.preference_id as string)
+        .eq("preference_init_point", intento.preference_init_point as string)
+        .select(PREFERENCE_SELECT)
+        .maybeSingle();
+      if (error || !normalized?.id) {
+        return res.status(409).json({ error: "mercadopago_preference_conflict" });
+      }
+      intento = normalized as IntentoPreferenceRow;
+    }
+  } else if (mode === "recover") {
+    try {
+      const recovered = await recoverMercadoPagoPreference({
+        accessToken: MP_ACCESS_TOKEN,
+        preferenceId: intento.preference_id as string,
+        expected: expectedPreference,
+      });
+      intento = await persistReadyPreference(recovered, "recover");
+    } catch (error) {
+      const code = preferenceErrorCode(error);
+      await markBridgeState("ambiguous", ["not_started", "creating", "ambiguous", "failed"], code);
+      const conflict = code === "mercadopago_preference_mismatch" ||
+        code === "mercadopago_preference_conflict";
+      return res.status(conflict ? 409 : 502).json({
+        error: conflict ? "mercadopago_preference_conflict" : "mercadopago_preference_error",
+      });
+    }
+  } else {
+    if (mode === "reconcile" && intento.preference_creation_state === "creating") {
+      await markBridgeState("ambiguous", ["creating"], "mercadopago_preference_stale");
+    }
 
-  console.log("[intento-pago] mp parsed", {
-    id: preference.id,
-    init_point: preference.init_point,
-    sandbox_init_point: preference.sandbox_init_point ?? null,
-    resolved_init_point: initPoint,
-  });
+    let resolved: MercadoPagoPreference;
+    if (mode === "claim") {
+      try {
+        resolved = await createMercadoPagoPreference({
+          accessToken: MP_ACCESS_TOKEN,
+          expected: expectedPreference,
+          notificationUrl,
+          backUrls,
+        });
+      } catch (error) {
+        const bridgeError = error instanceof MercadoPagoBridgeError ? error : null;
+        if (!bridgeError?.ambiguous) {
+          await markBridgeState("failed", ["creating"], preferenceErrorCode(error));
+          return res.status(502).json({ error: "mercadopago_preference_error" });
+        }
+        await markBridgeState("ambiguous", ["creating"], preferenceErrorCode(error));
+        mode = "reconcile";
+      }
+    }
 
-  if (!preference.id || !initPoint) {
-    return res.status(502).json({ error: "mercadopago_preference_error" });
+    if (mode === "reconcile") {
+      try {
+        resolved = await reconcileMercadoPagoPreference({
+          accessToken: MP_ACCESS_TOKEN,
+          expected: expectedPreference,
+        });
+      } catch (error) {
+        const code = preferenceErrorCode(error);
+        await markBridgeState("ambiguous", ["creating", "ambiguous"], code);
+        const conflict = code === "mercadopago_preference_conflict" ||
+          code === "mercadopago_preference_mismatch";
+        res.setHeader("Retry-After", "5");
+        return res.status(conflict ? 409 : 503).json({
+          error: conflict
+            ? "mercadopago_preference_conflict"
+            : "mercadopago_preference_ambiguous",
+        });
+      }
+    }
+
+    try {
+      intento = await persistReadyPreference(resolved!, "new");
+    } catch (error) {
+      await markBridgeState(
+        "ambiguous",
+        ["creating", "ambiguous"],
+        preferenceErrorCode(error),
+      );
+      return res.status(500).json({ error: "unexpected_error" });
+    }
   }
 
-  const { error: updateError } = await serviceClient
-    .from("intento_pago")
-    .update({
-      preference_id: preference.id,
-    })
-    .eq("id", row.intento_pago_id);
-
-  console.log("[intento-pago] update intento_pago", {
-    intento_pago_id: row.intento_pago_id,
-    preference_id: preference.id,
-    updateError,
-  });
-
-  if (updateError) {
-    return res.status(500).json({ error: "unexpected_error" });
+  if (!intento.preference_id || !intento.preference_init_point) {
+    return res.status(409).json({ error: "mercadopago_preference_conflict" });
   }
 
   return res.status(201).json({
@@ -381,8 +522,8 @@ export default async function handler(
       id: row.intento_pago_id,
       pedido_id: row.pedido_id,
       estado: row.estado_intento,
-      preference_id: preference.id,
-      init_point: initPoint,
+      preference_id: intento.preference_id,
+      init_point: intento.preference_init_point,
     },
   });
 }

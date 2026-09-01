@@ -2,6 +2,10 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createClient } from "@supabase/supabase-js";
 import { supabaseServer } from "../../../lib/supabaseServer";
 import {
+  createCheckoutRequestFingerprint,
+  parseIdempotencyKey,
+} from "../../../lib/checkoutIdempotency";
+import {
   applyRateLimitHeaders,
   checkRateLimit,
   hasBearerAuthorization,
@@ -146,6 +150,16 @@ export default async function handler(
       return res.status(400).json({ error: "empresa_id_required" });
     }
 
+    const rawIdempotencyKey = req.headers["idempotency-key"];
+    if (rawIdempotencyKey === undefined) {
+      return res.status(400).json({ error: "idempotency_key_required" });
+    }
+
+    const idempotencyKey = parseIdempotencyKey(rawIdempotencyKey);
+    if (!idempotencyKey) {
+      return res.status(400).json({ error: "idempotency_key_invalid" });
+    }
+
     const accessToken = getAccessToken(req);
 
     if (!accessToken) {
@@ -209,16 +223,30 @@ export default async function handler(
     }
 
     const rpcItems = items.map(toRpcItem);
-
-    const { data, error } = await supabaseServer.rpc("crear_pedido_con_items", {
-      p_usuario_id: usuarioId,
-      p_empresa_id: empresa_id,
-      p_direccion_envio_id: direccionEnvioId,
-      p_items: rpcItems,
+    const requestFingerprint = createCheckoutRequestFingerprint({
+      empresaId: empresa_id,
+      direccionEnvioId: direccion_envio_id,
+      items: rpcItems,
     });
+
+    const { data, error } = await supabaseServer.rpc(
+      "crear_pedido_con_items_idempotente",
+      {
+        p_usuario_id: usuarioId,
+        p_empresa_id: empresa_id,
+        p_direccion_envio_id: direccionEnvioId,
+        p_items: rpcItems,
+        p_idempotency_key: idempotencyKey,
+        p_request_fingerprint: requestFingerprint,
+      },
+    );
 
     if (error) {
       const message = getErrorMessage(error);
+
+      if (message === "idempotency_key_reused") {
+        return res.status(409).json({ error: message });
+      }
 
       if (message && DOMAIN_ERROR_STATUS[message]) {
         return res.status(DOMAIN_ERROR_STATUS[message]).json({
@@ -233,8 +261,14 @@ export default async function handler(
       });
     }
 
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row?.pedido_id || typeof row.reutilizado !== "boolean") {
+      return res.status(500).json({ error: "pedido_creation_failed" });
+    }
+
     return res.status(200).json({
-      pedido_id: data,
+      pedido_id: row.pedido_id,
+      reutilizado: row.reutilizado,
     });
   } catch (err) {
     console.error("UNEXPECTED ERROR:", err);
