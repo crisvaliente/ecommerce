@@ -4,7 +4,13 @@ import { useRouter } from "next/router";
 import AdminLayout from "../../../components/layout/AdminLayout";
 import Button from "../../../components/ui/Button";
 import Card from "../../../components/ui/Card";
+import { useAuth } from "../../../context/AuthContext";
 import { formatCurrency, formatDateTime } from "../../../lib/formatters";
+import {
+  getOrderOperationAction,
+  getPaymentConsolidationStatus,
+  submitOrderOperation,
+} from "../../../lib/orderOperationsUi";
 import { supabase } from "../../../lib/supabaseClient";
 
 type PedidoEstado =
@@ -159,7 +165,13 @@ function getCobroBanner(pedido: PedidoDetail): {
 
   if (!intento) return null;
 
-  if (intento.estado === "aprobado" && pedido.estado === "pagado") {
+  const consolidationStatus = getPaymentConsolidationStatus({
+    state: pedido.estado,
+    consolidatedPaymentAttemptId: pedido.intento_pago_consolidado_id,
+    paymentAttemptState: intento.estado,
+  });
+
+  if (consolidationStatus === "consolidated") {
     return {
       title: "Cobro consolidado",
       message: "El pago fue aprobado y el pedido ya quedó consolidado correctamente.",
@@ -167,7 +179,7 @@ function getCobroBanner(pedido: PedidoDetail): {
     };
   }
 
-  if (intento.estado === "aprobado" && pedido.estado !== "pagado") {
+  if (consolidationStatus === "approved_not_consolidated") {
     return {
       title: "Pago aprobado no consolidado",
       message:
@@ -228,14 +240,30 @@ function getIntentoBadges(pedido: PedidoDetail, intento: IntentoPago, index: num
 
 const PanelPedidoDetailPage: React.FC = () => {
   const router = useRouter();
+  const { dbUser } = useAuth();
   const pedidoId =
     typeof router.query.id === "string" ? router.query.id.trim() : "";
 
   const [pedido, setPedido] = useState<PedidoDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [operationPending, setOperationPending] = useState(false);
+  const [operationFeedback, setOperationFeedback] = useState<{
+    kind: "success" | "conflict" | "error";
+    message: string;
+  } | null>(null);
+  const operationAction = pedido
+    ? getOrderOperationAction(pedido.estado, dbUser?.rol)
+    : null;
   const pedidoBanner = pedido ? getPedidoBanner(pedido) : null;
   const cobroBanner = pedido ? getCobroBanner(pedido) : null;
+  const paymentConsolidationStatus = pedido
+    ? getPaymentConsolidationStatus({
+        state: pedido.estado,
+        consolidatedPaymentAttemptId: pedido.intento_pago_consolidado_id,
+        paymentAttemptState: pedido.intento_pago?.estado ?? null,
+      })
+    : "none";
   const ultimoPayloadResumen = pedido ? getUltimoPayloadResumen(pedido.intento_pago) : [];
 
   const fetchPedido = useCallback(async () => {
@@ -244,6 +272,7 @@ const PanelPedidoDetailPage: React.FC = () => {
     try {
       setLoading(true);
       setErrorMsg(null);
+      setOperationFeedback(null);
 
       const {
         data: { session },
@@ -316,6 +345,45 @@ const PanelPedidoDetailPage: React.FC = () => {
     fetchPedido();
   }, [fetchPedido, pedidoId, router.isReady]);
 
+  const handleOperation = async () => {
+    if (!pedido || !operationAction || operationPending) return;
+
+    setOperationPending(true);
+    setOperationFeedback(null);
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+
+      if (!accessToken) {
+        setOperationFeedback({
+          kind: "error",
+          message: "Tu sesión no es válida. Volvé a iniciar sesión.",
+        });
+        return;
+      }
+
+      const result = await submitOrderOperation({
+        pedidoId: pedido.pedido_id,
+        accessToken,
+        action: operationAction,
+        confirmCancellation: () =>
+          window.confirm(
+            "¿Confirmás la cancelación del pedido? Esta acción no se puede deshacer.",
+          ),
+        refresh: fetchPedido,
+      });
+
+      if (result.kind !== "cancelled") {
+        setOperationFeedback(result);
+      }
+    } finally {
+      setOperationPending(false);
+    }
+  };
+
   return (
     <AdminLayout>
       <div className="mb-6 flex items-center justify-between gap-3">
@@ -356,6 +424,40 @@ const PanelPedidoDetailPage: React.FC = () => {
               <p className="text-sm font-semibold">{pedidoBanner.title}</p>
               <p className="mt-1 text-sm opacity-90">{pedidoBanner.message}</p>
             </section>
+          )}
+
+          {operationAction && (
+            <Card className="p-4">
+              <h2 className="text-lg font-medium text-text">Operaciones del pedido</h2>
+              <p className="mt-1 text-sm text-muted">
+                Sólo se muestra la próxima acción disponible para el estado actual.
+              </p>
+              <div className="mt-4">
+                <Button
+                  onClick={handleOperation}
+                  disabled={operationPending}
+                  aria-busy={operationPending}
+                >
+                  {operationPending ? "Actualizando..." : operationAction.label}
+                </Button>
+              </div>
+            </Card>
+          )}
+
+          {operationFeedback && (
+            <p
+              role={operationFeedback.kind === "success" ? "status" : "alert"}
+              aria-live="polite"
+              className={`rounded-md border px-3 py-2 text-sm ${
+                operationFeedback.kind === "success"
+                  ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-700"
+                  : operationFeedback.kind === "conflict"
+                    ? "border-amber-500/20 bg-amber-500/10 text-amber-800"
+                    : "border-rose-500/20 bg-rose-500/10 text-rose-700"
+              }`}
+            >
+              {operationFeedback.message}
+            </p>
           )}
 
           <Card className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2 xl:grid-cols-3">
@@ -468,9 +570,9 @@ const PanelPedidoDetailPage: React.FC = () => {
                     <div>
                       <p className="text-xs uppercase tracking-wide text-muted">Lectura operativa</p>
                       <p className="mt-1 text-sm text-text">
-                        {pedido.intento_pago.estado === "aprobado" && pedido.estado !== "pagado"
+                        {paymentConsolidationStatus === "approved_not_consolidated"
                           ? "Pago aprobado no consolidado"
-                          : pedido.intento_pago.estado === "aprobado" && pedido.estado === "pagado"
+                          : paymentConsolidationStatus === "consolidated"
                             ? "Pago consolidado"
                             : "Sin excepción operativa detectada"}
                       </p>

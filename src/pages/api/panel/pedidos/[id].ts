@@ -1,5 +1,12 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { applyRateLimitHeaders, checkRateLimit } from "../../../../lib/apiSecurity";
+import {
+  applyRateLimitHeaders,
+  checkRateLimit,
+  hasBearerAuthorization,
+  hasSessionAccessCookie,
+  validateTrustedOrigin,
+} from "../../../../lib/apiSecurity";
+import { createOrderDetailHandler } from "../../../../lib/orderOperationsApi";
 import { authorizePanelAccess } from "../../../../lib/panelAuthorization";
 
 type PedidoEstado =
@@ -81,15 +88,10 @@ function logPanelError(operation: string, error: unknown): void {
   });
 }
 
-export default async function handler(
+async function getOrderDetail(
   req: NextApiRequest,
   res: NextApiResponse<ApiOk | ApiErr>
 ) {
-  if (req.method !== "GET") {
-    res.setHeader("Allow", "GET");
-    return res.status(405).json({ error: "Method not allowed" });
-  }
-
   const rateLimit = checkRateLimit(req, {
     key: "api:panel:pedidos:detail",
     limit: 60,
@@ -239,3 +241,30 @@ export default async function handler(
     return res.status(500).json({ error: "internal_error" });
   }
 }
+
+export default createOrderDetailHandler({
+  authorizePanelAccess: async (req) => {
+    const authorization = await authorizePanelAccess(req as NextApiRequest);
+    if (authorization.ok === false) {
+      return authorization;
+    }
+
+    return {
+      ...authorization,
+      supabaseAdmin: {
+        rpc: async (name: string, params: Record<string, unknown>) =>
+          authorization.supabaseAdmin.rpc(name, params),
+      },
+    };
+  },
+  applyRateLimitHeaders,
+  checkRateLimit,
+  hasBearerAuthorization,
+  hasSessionAccessCookie,
+  validateTrustedOrigin,
+  getHandler: (req, res) =>
+    getOrderDetail(
+      req as NextApiRequest,
+      res as unknown as NextApiResponse<ApiOk | ApiErr>,
+    ),
+});
