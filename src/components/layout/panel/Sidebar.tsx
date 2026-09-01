@@ -2,6 +2,7 @@ import Link from "next/link";
 import { useRouter } from "next/router";
 import React from "react";
 import { useAuth } from "../../../context/AuthContext";
+import { instanceConfig } from "../../../config/instance";
 
 type PanelLink = {
   href: string;
@@ -58,7 +59,7 @@ const PanelSidebar: React.FC = () => {
   return (
     <aside className="rz-sidebar">
       <div className="rz-sidebar-header">
-        <span className="rz-sidebar-brand">RAEYZ</span>
+        <span className="rz-sidebar-brand">{instanceConfig.store.name}</span>
         <span className="rz-sidebar-subtitle">Panel administrativo</span>
       </div>
 

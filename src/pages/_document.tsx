@@ -1,5 +1,6 @@
 import Document, { Html, Head, Main, NextScript } from 'next/document';
 import { DocumentContext, DocumentInitialProps } from 'next/document';
+import { instanceConfig } from '../config/instance';
 
 class MyDocument extends Document {
   static async getInitialProps(ctx: DocumentContext): Promise<DocumentInitialProps> {
@@ -9,7 +10,7 @@ class MyDocument extends Document {
 
   render() {
     return (
-      <Html>
+      <Html lang={instanceConfig.locale}>
         <Head />
         <body>
           <Main />

@@ -4,6 +4,7 @@ import { useRouter } from "next/router";
 import AdminLayout from "../../../components/layout/AdminLayout";
 import Button from "../../../components/ui/Button";
 import Card from "../../../components/ui/Card";
+import { formatCurrency, formatDateTime } from "../../../lib/formatters";
 import { supabase } from "../../../lib/supabaseClient";
 
 type PedidoEstado =
@@ -81,19 +82,6 @@ const intentoEstadoLabel: Record<IntentoPagoEstado, string> = {
   cancelado: "Cancelado",
   expirado: "Expirado",
 };
-
-function formatDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-
-  return date.toLocaleString("es-UY", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 function renderSnapshot(snapshot: unknown): string {
   if (!snapshot || typeof snapshot !== "object") {
@@ -381,10 +369,7 @@ const PanelPedidoDetailPage: React.FC = () => {
             <div>
               <p className="text-xs uppercase tracking-wide text-muted">Total</p>
               <p className="mt-1 text-sm text-text">
-                {pedido.total.toLocaleString("es-UY", {
-                  style: "currency",
-                  currency: "UYU",
-                })}
+                {formatCurrency(pedido.total)}
               </p>
             </div>
 
@@ -397,17 +382,17 @@ const PanelPedidoDetailPage: React.FC = () => {
 
             <div>
               <p className="text-xs uppercase tracking-wide text-muted">Creado</p>
-              <p className="mt-1 text-sm text-text">{formatDate(pedido.creado_en)}</p>
+              <p className="mt-1 text-sm text-text">{formatDateTime(pedido.creado_en)}</p>
             </div>
 
             <div>
               <p className="text-xs uppercase tracking-wide text-muted">Expira</p>
-              <p className="mt-1 text-sm text-text">{formatDate(pedido.expira_en)}</p>
+              <p className="mt-1 text-sm text-text">{formatDateTime(pedido.expira_en)}</p>
             </div>
 
             <div>
               <p className="text-xs uppercase tracking-wide text-muted">Actualizado</p>
-              <p className="mt-1 text-sm text-text">{formatDate(pedido.actualizado_en)}</p>
+              <p className="mt-1 text-sm text-text">{formatDateTime(pedido.actualizado_en)}</p>
             </div>
           </Card>
 
@@ -452,13 +437,13 @@ const PanelPedidoDetailPage: React.FC = () => {
                   <div>
                     <p className="text-xs uppercase tracking-wide text-muted">Creado</p>
                     <p className="mt-1 text-sm text-text">
-                      {formatDate(pedido.intento_pago.creado_en)}
+                      {formatDateTime(pedido.intento_pago.creado_en)}
                     </p>
                   </div>
                   <div>
                     <p className="text-xs uppercase tracking-wide text-muted">Actualizado</p>
                     <p className="mt-1 text-sm text-text">
-                      {formatDate(pedido.intento_pago.actualizado_en)}
+                      {formatDateTime(pedido.intento_pago.actualizado_en)}
                     </p>
                   </div>
                 </div>
@@ -470,7 +455,7 @@ const PanelPedidoDetailPage: React.FC = () => {
                       <p className="text-xs uppercase tracking-wide text-muted">Última notificación</p>
                       <p className="mt-1 text-sm text-text">
                         {pedido.intento_pago.notificado_en
-                          ? formatDate(pedido.intento_pago.notificado_en)
+                          ? formatDateTime(pedido.intento_pago.notificado_en)
                           : "Sin webhook registrado"}
                       </p>
                     </div>
@@ -558,16 +543,10 @@ const PanelPedidoDetailPage: React.FC = () => {
                         <td className="px-4 py-2 text-muted">{item.talle ?? "-"}</td>
                         <td className="px-4 py-2 text-muted">{item.cantidad}</td>
                         <td className="px-4 py-2 text-muted">
-                          {item.precio_unitario.toLocaleString("es-UY", {
-                            style: "currency",
-                            currency: "UYU",
-                          })}
+                          {formatCurrency(item.precio_unitario)}
                         </td>
                         <td className="px-4 py-2 text-text">
-                          {item.subtotal.toLocaleString("es-UY", {
-                            style: "currency",
-                            currency: "UYU",
-                          })}
+                          {formatCurrency(item.subtotal)}
                         </td>
                       </tr>
                     ))}
@@ -618,11 +597,11 @@ const PanelPedidoDetailPage: React.FC = () => {
                         </div>
                         <div>
                           <p className="text-xs uppercase tracking-wide text-muted">Creado</p>
-                          <p className="mt-1 text-sm text-text">{formatDate(intento.creado_en)}</p>
+                          <p className="mt-1 text-sm text-text">{formatDateTime(intento.creado_en)}</p>
                         </div>
                         <div>
                           <p className="text-xs uppercase tracking-wide text-muted">Actualizado</p>
-                          <p className="mt-1 text-sm text-text">{formatDate(intento.actualizado_en)}</p>
+                          <p className="mt-1 text-sm text-text">{formatDateTime(intento.actualizado_en)}</p>
                         </div>
                         <div>
                           <p className="text-xs uppercase tracking-wide text-muted">External ID</p>
@@ -638,7 +617,7 @@ const PanelPedidoDetailPage: React.FC = () => {
                         <div>
                           <p className="text-xs uppercase tracking-wide text-muted">Última notificación</p>
                           <p className="mt-1 text-sm text-text">
-                            {intento.notificado_en ? formatDate(intento.notificado_en) : "-"}
+                            {intento.notificado_en ? formatDateTime(intento.notificado_en) : "-"}
                           </p>
                         </div>
                         <div>

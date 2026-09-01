@@ -4,7 +4,12 @@
   "store": {
     "name": "Raeyz",
     "slug": "raeyz",
-    "description": "Raeyz ecommerce storefront"
+    "description": "Raeyz ecommerce storefront",
+    "assets": {
+      "logo": "/images/logo.PNG",
+      "hero": "/images/obra.png",
+      "favicon": "/images/favicon.ico"
+    }
   },
   "locale": "es-UY",
   "currency": "UYU"

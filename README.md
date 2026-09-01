@@ -8,6 +8,7 @@ Each deployment has one canonical storefront described by `instance.config.json`
 
 - `instanceKey`: stable technical namespace;
 - `store.name`, `store.slug`, and optional `store.description`;
+- `store.assets.logo`, `store.assets.hero`, and `store.assets.favicon` as public asset paths;
 - `locale`;
 - `currency`, currently restricted to `UYU`.
 
@@ -17,6 +18,8 @@ Each deployment has one canonical storefront described by `instance.config.json`
 bucket: producto-imagenes
 path: empresa/{empresaId}/producto/{productoId}/{imagenId}.{ext}
 ```
+
+Each instance must provide valid local files for its configured logo, hero, and favicon paths. Asset validation checks the paths, not the file contents.
 
 Secrets and deployment-specific URLs belong in `.env.local`, never in the JSON file. `APP_BASE_URL` is the canonical origin used for OAuth callbacks, trusted origins, and Mercado Pago webhook URLs.
 

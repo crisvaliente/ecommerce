@@ -3,6 +3,7 @@ import Link from "next/link";
 import AdminLayout from "../../../components/layout/AdminLayout";
 import Button from "../../../components/ui/Button";
 import Card from "../../../components/ui/Card";
+import { formatCurrency, formatDateTime } from "../../../lib/formatters";
 import { supabase } from "../../../lib/supabaseClient";
 
 type PedidoEstado =
@@ -54,19 +55,6 @@ function getEstadoBadgeClass(pedido: PedidoPanelDTO): string {
     default:
       return "border-border bg-black/[0.03] text-text";
   }
-}
-
-function formatDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-
-  return date.toLocaleString("es-UY", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 const PanelPedidosPage: React.FC = () => {
@@ -194,18 +182,15 @@ const PanelPedidosPage: React.FC = () => {
                   </td>
 
                   <td className="px-4 py-3 text-text">
-                    {Number(pedido.total).toLocaleString("es-UY", {
-                      style: "currency",
-                      currency: "UYU",
-                    })}
+                    {formatCurrency(Number(pedido.total))}
                   </td>
 
                   <td className="px-4 py-3 text-muted">
-                    {formatDate(pedido.creado_en)}
+                    {formatDateTime(pedido.creado_en)}
                   </td>
 
                   <td className="px-4 py-3 text-muted">
-                    {formatDate(pedido.expira_en)}
+                    {formatDateTime(pedido.expira_en)}
                   </td>
 
                   <td className="px-4 py-3 text-right">

@@ -16,6 +16,11 @@ const VALID_CONFIG = {
     name: "Raeyz",
     slug: "raeyz",
     description: "Raeyz storefront",
+    assets: {
+      logo: "/images/logo.PNG",
+      hero: "/images/obra.png",
+      favicon: "/images/favicon.ico",
+    },
   },
   locale: "es-UY",
   currency: "UYU",
@@ -25,9 +30,41 @@ test("accepts the minimum supported instance contract", () => {
   const config = parseInstanceConfig(VALID_CONFIG);
 
   assert.equal(config.store.slug, "raeyz");
+  assert.equal(config.store.assets.logo, "/images/logo.PNG");
+  assert.equal(config.store.assets.hero, "/images/obra.png");
+  assert.equal(config.store.assets.favicon, "/images/favicon.ico");
   assert.equal(config.currency, "UYU");
   assert.equal(config.storage.productImagesBucket, FIXED_STORAGE_BUCKET);
   assert.equal(config.storage.productImagePathTemplate, FIXED_PRODUCT_IMAGE_PATH_TEMPLATE);
+});
+
+test("rejects missing or unsafe storefront asset paths", () => {
+  assert.throws(
+    () =>
+      parseInstanceConfig({
+        ...VALID_CONFIG,
+        store: { ...VALID_CONFIG.store, assets: undefined },
+      }),
+    /store.assets/,
+  );
+
+  for (const [field, value] of [
+    ["logo", "https://cdn.example.com/logo.png"],
+    ["hero", "//cdn.example.com/hero.png"],
+    ["favicon", "/images/favicon.ico?version=1"],
+  ]) {
+    assert.throws(
+      () =>
+        parseInstanceConfig({
+          ...VALID_CONFIG,
+          store: {
+            ...VALID_CONFIG.store,
+            assets: { ...VALID_CONFIG.store.assets, [field]: value },
+          },
+        }),
+      new RegExp(`store\\.assets\\.${field}`),
+    );
+  }
 });
 
 test("rejects unsupported currencies", () => {

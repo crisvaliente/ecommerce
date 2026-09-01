@@ -318,7 +318,7 @@ const ColeccionPage: React.FC<
         ? `${producto.nombre} - Talle ${varianteSeleccionada.talle}`
         : producto.nombre,
       price: producto.precio,
-      image: "/images/logo.PNG",
+      image: instanceConfig.store.assets.logo,
     });
   };
 

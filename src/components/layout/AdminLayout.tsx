@@ -4,6 +4,7 @@ import { useRouter } from "next/router";
 import { useAuth } from "../../context/AuthContext";
 import PanelSidebar from "./panel/Sidebar";
 import PanelNavbar from "./panel/Navbar";
+import { instanceConfig } from "../../config/instance";
 
 interface AdminLayoutProps {
   children: ReactNode;
@@ -21,7 +22,7 @@ const PanelInterstitial: React.FC<InterstitialProps> = ({ title, message }) => {
     <div className="flex min-h-screen items-center justify-center bg-[#EEECE1] px-6">
       <div className="w-full max-w-md rounded-[28px] border border-stone-200 bg-white p-8 text-center shadow-sm">
         <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#E30B13]">
-          Raeyz Admin
+          {instanceConfig.store.name} Admin
         </p>
         <h1 className="mt-3 text-2xl font-semibold text-[#0D0D0E]">{title}</h1>
         <p className="mt-3 text-sm leading-6 text-stone-600">{message}</p>

@@ -12,6 +12,11 @@ export type InstanceConfig = {
     name: string;
     slug: string;
     description: string | null;
+    assets: {
+      logo: string;
+      hero: string;
+      favicon: string;
+    };
   };
   locale: string;
   currency: typeof SUPPORTED_CURRENCY;
@@ -23,6 +28,7 @@ export type InstanceConfig = {
 
 const IDENTIFIER_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const LOCALE_PATTERN = /^[a-z]{2,3}(?:-[A-Z]{2})?$/;
+const PUBLIC_ASSET_PATH_PATTERN = /^\/(?!\/)[^\s?#]+$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -67,6 +73,10 @@ export function parseInstanceConfig(value: unknown): InstanceConfig {
     throw new Error(`Invalid instance config: currency must be ${SUPPORTED_CURRENCY}.`);
   }
 
+  if (!isRecord(value.store.assets)) {
+    throw new Error("Invalid instance config: store.assets must be an object.");
+  }
+
   const descriptionValue = value.store.description;
   const description =
     descriptionValue === undefined || descriptionValue === null
@@ -86,6 +96,20 @@ export function parseInstanceConfig(value: unknown): InstanceConfig {
         pattern: IDENTIFIER_PATTERN,
       }),
       description,
+      assets: Object.freeze({
+        logo: requireTrimmedString(value.store.assets.logo, "store.assets.logo", {
+          maxLength: 255,
+          pattern: PUBLIC_ASSET_PATH_PATTERN,
+        }),
+        hero: requireTrimmedString(value.store.assets.hero, "store.assets.hero", {
+          maxLength: 255,
+          pattern: PUBLIC_ASSET_PATH_PATTERN,
+        }),
+        favicon: requireTrimmedString(value.store.assets.favicon, "store.assets.favicon", {
+          maxLength: 255,
+          pattern: PUBLIC_ASSET_PATH_PATTERN,
+        }),
+      }),
     }),
     locale: requireTrimmedString(value.locale, "locale", {
       maxLength: 16,

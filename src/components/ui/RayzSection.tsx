@@ -2,6 +2,7 @@
 import React from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
+import { instanceConfig } from '../../config/instance';
 
 interface RayzSectionProps {
   title?: string;
@@ -12,17 +13,17 @@ interface RayzSectionProps {
 }
 
 const RayzSection: React.FC<RayzSectionProps> = ({
-  title = "Bienvenidx a RÆYZ",
-  subtitle = "Conectá con tu estilo. Handmade & único como vos.",
+  title = `Bienvenidx a ${instanceConfig.store.name}`,
+  subtitle = instanceConfig.store.description ?? "",
   buttonText = "Ver colección",
   buttonLink = "/coleccion",
-  backgroundImage = "/images/obra.png"
+  backgroundImage = instanceConfig.store.assets.hero
 }) => {
   return (
     <section className="relative h-[80vh] flex items-center justify-center text-white bg-black overflow-hidden">
       <Image
         src={backgroundImage}
-        alt="Rayz Hero"
+        alt={`Presentación de ${instanceConfig.store.name}`}
         fill
         className="object-contain object-center opacity-100"
         priority

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { useEffect, useMemo, useState } from "react";
+import { formatCurrency } from "../../lib/formatters";
 import { supabase } from "../../lib/supabaseClient";
 
 type CheckoutStatus = "success" | "failure" | "pending" | "unknown";
@@ -227,10 +228,7 @@ export default function CheckoutResultadoPage() {
             <div className="mt-4">
               <p className="text-xs uppercase tracking-wide text-stone-500">Total del pedido</p>
               <p className="mt-1 text-sm text-stone-900">
-                {pedidoTotal.toLocaleString("es-UY", {
-                  style: "currency",
-                  currency: "UYU",
-                })}
+                {formatCurrency(pedidoTotal)}
               </p>
             </div>
           )}

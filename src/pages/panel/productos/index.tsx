@@ -5,6 +5,7 @@ import Button from "../../../components/ui/Button";
 import Card from "../../../components/ui/Card";
 import Input from "../../../components/ui/Input";
 import { useAuth } from "../../../context/AuthContext";
+import { formatCurrency } from "../../../lib/formatters";
 import { supabase } from "../../../lib/supabaseClient";
 import Link from "next/link";
 
@@ -345,10 +346,7 @@ const ProductosPage: React.FC = () => {
                   </td>
 
                   <td className="px-4 py-3 text-text">
-                    {Number(p.precio).toLocaleString("es-UY", {
-                      style: "currency",
-                      currency: "UYU",
-                    })}
+                    {formatCurrency(Number(p.precio))}
                   </td>
 
                   <td className="px-4 py-3">

@@ -8,6 +8,7 @@ import { useCart } from '../ui/CartContext';
 import LoginMenu from './LoginMenu';
 import { useAuth } from '../../context/AuthContext';
 import Image from 'next/image';
+import { instanceConfig } from '../../config/instance';
 
 const Header: React.FC = () => {
   const router = useRouter();
@@ -58,8 +59,8 @@ const Header: React.FC = () => {
         <div className="flex-shrink-0 bg-background p-1 rounded">
           <Link href="/">
             <Image
-              src="/images/logo.PNG"
-              alt="Logo RÆYZ"
+              src={instanceConfig.store.assets.logo}
+              alt={`Logo ${instanceConfig.store.name}`}
               width={40}
               height={40}
               className="h-10 w-auto"

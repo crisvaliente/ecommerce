@@ -3,6 +3,7 @@ import Image from 'next/image';
 import { FaShoppingCart, FaTrash, FaPlus, FaMinus } from 'react-icons/fa';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getCartIdentityKey, useCart } from './CartContext';
+import { formatCurrency } from '../../lib/formatters';
 
 interface ShoppingCartProps {
   isOpen: boolean;
@@ -74,7 +75,7 @@ const ShoppingCart: React.FC<ShoppingCartProps> = ({ isOpen, onClose }) => {
                         </div>
                         <div className="flex-grow">
                           <h3 className="font-medium text-gray-800">{item.name}</h3>
-                          <p className="text-gray-600">${item.price.toFixed(2)}</p>
+                          <p className="text-gray-600">{formatCurrency(item.price)}</p>
                           <div className="flex items-center mt-2">
                             <button
                               onClick={() =>
@@ -116,7 +117,7 @@ const ShoppingCart: React.FC<ShoppingCartProps> = ({ isOpen, onClose }) => {
               <div className="p-4 border-t mt-auto">
                 <div className="flex justify-between text-lg font-semibold mb-4 text-gray-800">
                   <span>Total:</span>
-                  <span>${total.toFixed(2)}</span>
+                  <span>{formatCurrency(total)}</span>
                 </div>
                 <button
                   type="button"

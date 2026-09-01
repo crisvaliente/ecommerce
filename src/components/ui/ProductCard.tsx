@@ -2,6 +2,8 @@ import React from "react";
 import Link from "next/link";
 import Button from "./Button";
 import Card from "./Card";
+import { instanceConfig } from "../../config/instance";
+import { formatCurrency } from "../../lib/formatters";
 
 type ProductCardAction =
   | {
@@ -61,7 +63,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
             <div className="absolute inset-x-0 bottom-0 h-24 bg-[linear-gradient(180deg,transparent,rgba(13,13,14,0.06))]" />
             <div className="relative flex flex-col items-center text-center">
               <span className="font-raleway text-4xl font-black uppercase tracking-[0.28em] text-dark/90">
-                RAEYZ
+                {instanceConfig.store.name}
               </span>
               <span className="mt-2 text-[10px] uppercase tracking-[0.34em] text-dark/45">
                 Producto destacado
@@ -93,10 +95,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
           </h2>
 
           <p className="text-2xl font-black leading-none text-dark sm:text-[1.9rem]">
-            {precio.toLocaleString("es-UY", {
-              style: "currency",
-              currency: "UYU",
-            })}
+            {formatCurrency(precio)}
           </p>
 
           {descripcion && (
