@@ -1,8 +1,7 @@
 // src/services/authService.ts
 import { useRouter } from "next/router";
+import { buildOAuthCallbackUrl } from "../config/instance";
 import { supabase } from "../lib/supabaseClient";
-
-const REDIRECT_URL = "http://localhost:3000/auth/callback"; // debe estar permitido en Supabase
 
 export function useGoogleLoginHandler() {
   const router = useRouter();
@@ -11,7 +10,7 @@ export function useGoogleLoginHandler() {
   const handleGoogleLogin = async () => {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: REDIRECT_URL },
+      options: { redirectTo: buildOAuthCallbackUrl() },
     });
     // Si no hay error, el navegador redirige a Google automáticamente.
     if (error) {

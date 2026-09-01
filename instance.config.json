@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "instanceKey": "raeyz",
+  "store": {
+    "name": "Raeyz",
+    "slug": "raeyz",
+    "description": "Raeyz ecommerce storefront"
+  },
+  "locale": "es-UY",
+  "currency": "UYU"
+}

@@ -2,13 +2,11 @@ import React, { useState } from "react";
 import type { GetServerSideProps, InferGetServerSidePropsType } from "next";
 import ProductCard from "../../components/ui/ProductCard";
 import { useCart } from "../../components/ui/CartContext";
+import { instanceConfig } from "../../config/instance";
 import { supabaseServer } from "../../lib/supabaseServer";
 import { BUCKET_PRODUCTO_IMAGENES } from "../../utils/storageProductoImagen";
 
-const STOREFRONT_TENANT =
-  process.env.NODE_ENV === "production"
-    ? { slug: "raeyz", name: "Raeyz" }
-    : { slug: "empresa-smoke", name: "EMPRESA_SMOKE" };
+const STOREFRONT_TENANT = instanceConfig.store;
 type ProductoEstado = "draft" | "published";
 
 type ProductoRow = {

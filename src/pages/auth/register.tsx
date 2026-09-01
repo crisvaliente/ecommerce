@@ -1,6 +1,7 @@
 // src/pages/auth/register.tsx
 import React, { useState } from "react";
 import { useRouter } from "next/router";
+import { buildOAuthCallbackUrl } from "../../config/instance";
 import { supabase } from "../../lib/supabaseClient";
 
 type Feedback = {
@@ -39,14 +40,11 @@ export default function RegisterPage() {
     setLoading(true);
 
     try {
-      const origin =
-        typeof window !== "undefined" ? window.location.origin : undefined;
-
       const { data, error } = await supabase.auth.signUp({
         email: email.trim().toLowerCase(),
         password,
         options: {
-          emailRedirectTo: origin ? `${origin}/auth/callback` : undefined,
+          emailRedirectTo: buildOAuthCallbackUrl(),
           data: { name },
         },
       });
@@ -87,11 +85,9 @@ export default function RegisterPage() {
 
   const handleGoogleRegister = async () => {
     setFeedback(null);
-    const origin =
-      typeof window !== "undefined" ? window.location.origin : undefined;
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: origin ? `${origin}/auth/callback` : undefined },
+      options: { redirectTo: buildOAuthCallbackUrl() },
     });
     if (error) setFeedback({ kind: "error", text: error.message });
   };

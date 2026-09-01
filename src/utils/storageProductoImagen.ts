@@ -1,7 +1,8 @@
 // src/utils/storageProductoImagen.ts
+import { FIXED_STORAGE_BUCKET } from "../config/instance";
 import { supabase } from "../lib/supabaseClient";
 
-export const BUCKET_PRODUCTO_IMAGENES = "producto-imagenes" as const;
+export const BUCKET_PRODUCTO_IMAGENES = FIXED_STORAGE_BUCKET;
 
 export type UploadProductoImagenResult = {
   path: string;            // VERDAD (guardar 1:1 en DB)

@@ -8,7 +8,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "smoke:bootstrap": "node scripts/bootstrap-smoke-users.mjs"
+    "test:instance-config": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test scripts/instance-config.test.mjs",
+    "bootstrap:instance": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/bootstrap-instance.mjs",
+    "seed:optional": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/bootstrap-instance.mjs --seed",
+    "smoke:bootstrap": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/bootstrap-smoke-users.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.8",

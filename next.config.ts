@@ -1,4 +1,7 @@
 import type { NextConfig } from "next";
+import { parseAppBaseUrl } from "./src/config/instance";
+
+const appBaseUrl = parseAppBaseUrl(process.env.APP_BASE_URL);
 
 const contentSecurityPolicy = [
   "default-src 'self'",
@@ -16,6 +19,9 @@ const contentSecurityPolicy = [
 ].join("; ");
 
 const nextConfig: NextConfig = {
+  env: {
+    APP_BASE_URL: appBaseUrl,
+  },
   async headers() {
     return [
       {

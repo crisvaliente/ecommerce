@@ -1,4 +1,27 @@
-# Copy this file to .env.local and fill it with credentials from the local Supabase stack.
+# Canonical URL for trusted origins, OAuth callbacks, and Mercado Pago webhooks.
+APP_BASE_URL=http://localhost:3000
+
+# Supabase runtime credentials. Use only values from `supabase status -o env` locally.
 NEXT_PUBLIC_SUPABASE_URL=replace-with-local-supabase-url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=replace-with-local-anon-key
 SUPABASE_SERVICE_ROLE_KEY=replace-with-local-service-role-key
+
+# Required by `pnpm bootstrap:instance`. Never commit real credentials.
+INSTANCE_ADMIN_EMAIL=admin@local.test
+INSTANCE_ADMIN_PASSWORD=replace-with-a-local-password
+INSTANCE_ADMIN_NAME=Instance Admin
+
+# Optional local demo/smoke identities. Required only by `pnpm smoke:bootstrap`.
+SMOKE_ADMIN_EMAIL=admin_smoke@local.test
+SMOKE_ADMIN_PASSWORD=replace-with-a-local-smoke-password
+SMOKE_BUYER_EMAIL=buyer_smoke@local.test
+SMOKE_BUYER_PASSWORD=replace-with-a-local-smoke-password
+
+# Required only when Mercado Pago checkout/webhooks are exercised.
+MERCADOPAGO_ACCESS_TOKEN=
+MERCADOPAGO_WEBHOOK_SECRET=
+
+# Local-only webhook diagnostics. Never enable bypasses in production.
+MP_WEBHOOK_DEV_MODE=0
+MP_WEBHOOK_ALLOW_LOOKUP_FALLBACK=0
+MP_WEBHOOK_MAX_SIGNATURE_AGE_SECONDS=300
