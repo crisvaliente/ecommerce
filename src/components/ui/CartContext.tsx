@@ -6,6 +6,7 @@ import React, {
   useReducer,
   useState,
 } from 'react';
+import { createCartMarker } from '../../lib/buyerCheckout';
 
 export const CART_PERSISTENCE_VERSION = 1 as const;
 const STORAGE_KEY = `ecommerce.cart.v${CART_PERSISTENCE_VERSION}`;
@@ -50,6 +51,9 @@ interface CartContextType extends CartState {
   decrementItem: (productoId: string, varianteId: string | null) => void;
   removeItem: (productoId: string, varianteId: string | null) => void;
   clearCart: () => void;
+  clearCartIfMatches: (expectedMarker: string) => boolean;
+  cartMarker: string;
+  isHydrated: boolean;
   itemCount: number;
   total: number;
 }
@@ -281,6 +285,15 @@ export const CartProvider: React.FC<CartProviderProps> = ({ children }) => {
     }
   }, [isHydrated, state]);
 
+  const cartMarker = createCartMarker(state);
+  const clearCartIfMatches = (expectedMarker: string): boolean => {
+    if (!isHydrated || state.items.length === 0 || cartMarker !== expectedMarker) {
+      return false;
+    }
+    dispatch({ type: 'clear' });
+    return true;
+  };
+
   const itemCount = state.items.reduce(
     (count, item) => count + item.quantity,
     0,
@@ -303,6 +316,9 @@ export const CartProvider: React.FC<CartProviderProps> = ({ children }) => {
         removeItem: (productoId, varianteId) =>
           dispatch({ type: 'remove', identity: { productoId, varianteId } }),
         clearCart: () => dispatch({ type: 'clear' }),
+        clearCartIfMatches,
+        cartMarker,
+        isHydrated,
         itemCount,
         total,
       }}

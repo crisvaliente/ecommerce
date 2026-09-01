@@ -80,6 +80,16 @@ function isStale(startedAt: string | null, nowMs: number, staleMs: number): bool
   return !Number.isFinite(timestamp) || nowMs - timestamp >= staleMs;
 }
 
+export function isManualPreferenceRetryAllowed(
+  state: PersistedPreferenceState,
+  manualRetry: boolean,
+): boolean {
+  return manualRetry &&
+    state.preference_creation_state === "failed" &&
+    state.preference_id === null &&
+    state.preference_init_point === null;
+}
+
 export function getPreferenceResolutionMode(
   state: PersistedPreferenceState,
   options: { nowMs?: number; staleMs?: number } = {},

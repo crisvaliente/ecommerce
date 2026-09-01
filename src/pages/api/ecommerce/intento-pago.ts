@@ -12,6 +12,7 @@ import {
   assertPreferenceMatchesPersisted,
   createMercadoPagoPreference,
   getPreferenceResolutionMode,
+  isManualPreferenceRetryAllowed,
   MercadoPagoBridgeError,
   reconcileMercadoPagoPreference,
   recoverMercadoPagoPreference,
@@ -180,6 +181,7 @@ export default async function handler(
   }
 
   const pedidoId = req.body?.pedido_id;
+  const manualPreferenceRetry = req.body?.retry_failed_preference === true;
 
   if (!isValidUuid(pedidoId)) {
     return res.status(400).json({ error: "pedido_id_invalido" });
@@ -383,6 +385,33 @@ export default async function handler(
     mode = getPreferenceResolutionMode(intento);
   } catch {
     return res.status(409).json({ error: "mercadopago_preference_conflict" });
+  }
+
+  if (isManualPreferenceRetryAllowed(intento, manualPreferenceRetry)) {
+    const { data: reset, error: resetError } = await serviceClient
+      .from("intento_pago")
+      .update({
+        preference_creation_state: "not_started",
+        preference_creation_started_at: null,
+        preference_last_error: null,
+      })
+      .eq("id", row.intento_pago_id)
+      .eq("preference_creation_state", "failed")
+      .is("preference_id", null)
+      .is("preference_init_point", null)
+      .select(PREFERENCE_SELECT)
+      .maybeSingle();
+
+    if (resetError) return res.status(500).json({ error: "unexpected_error" });
+    intento = reset?.id
+      ? (reset as IntentoPreferenceRow)
+      : await readPreferenceState();
+    if (!intento) return res.status(500).json({ error: "unexpected_error" });
+    try {
+      mode = getPreferenceResolutionMode(intento);
+    } catch {
+      return res.status(409).json({ error: "mercadopago_preference_conflict" });
+    }
   }
 
   if (mode === "claim") {

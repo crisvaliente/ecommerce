@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test:instance-config": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test scripts/instance-config.test.mjs",
+    "test:buyer-checkout": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test scripts/buyer-checkout.test.mjs",
     "test:checkout-idempotency": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test scripts/checkout-idempotency.test.mjs",
     "test:checkout-idempotency:db": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test scripts/checkout-idempotency-db.test.mjs",
     "bootstrap:instance": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/bootstrap-instance.mjs",

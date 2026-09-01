@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { supabase } from "../../lib/supabaseClient";
 import { useAuth } from "../../context/AuthContext";
+import { getSafeAuthReturn } from "../../lib/buyerCheckout";
 
 const getErrorMessage = (err: unknown): string => {
   if (err instanceof Error) return err.message;
@@ -21,14 +22,15 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const returnTo = getSafeAuthReturn(router.query.next);
 
   const go = (path: string) => router.push(path);
 
   useEffect(() => {
-    if (!authLoading && sessionUser) {
-      router.replace("/debug/auth"); // TODO: cambiar a "/panel" o lo que definas
+    if (!authLoading && sessionUser && router.isReady) {
+      router.replace(returnTo);
     }
-  }, [authLoading, sessionUser, router]);
+  }, [authLoading, returnTo, router, sessionUser]);
 
   // --- Login con email/clave ---
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -58,7 +60,7 @@ export default function LoginPage() {
     try {
       const redirectTo =
         typeof window !== "undefined"
-          ? `${window.location.origin}/auth/callback`
+          ? `${window.location.origin}/auth/callback?next=${encodeURIComponent(returnTo)}`
           : undefined;
 
       const { error } = await supabase.auth.signInWithOAuth({
@@ -142,12 +144,12 @@ export default function LoginPage() {
 
       <div className="mt-4 text-sm opacity-80">
         <p>
-          ¿Querés probar la sesión actual?{" "}
+          ¿Querés volver a comprar?{" "}
           <button
-            onClick={() => go("/debug/auth")}
+            onClick={() => go("/coleccion")}
             className="text-blue-600 underline"
           >
-            Ir a /debug/auth
+            Ir a la colección
           </button>
         </p>
       </div>

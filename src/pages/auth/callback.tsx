@@ -1,6 +1,7 @@
 // /src/pages/auth/callback.tsx
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/router";
+import { getSafeAuthReturn } from "../../lib/buyerCheckout";
 import { supabase } from "../../lib/supabaseClient";
 
 export default function Callback() {
@@ -15,19 +16,21 @@ export default function Callback() {
     const run = async () => {
       try {
         const url = new URL(window.location.href);
+        const returnTo = getSafeAuthReturn(url.searchParams.get("next"));
+        const loginUrl = `/auth/login?next=${encodeURIComponent(returnTo)}`;
 
         const err = url.searchParams.get("error_description");
         if (err) {
           setMsg(`Error: ${err}`);
-          router.replace("/auth/login?error=" + encodeURIComponent(err));
+          router.replace(`${loginUrl}&error=${encodeURIComponent(err)}`);
           return;
         }
 
         // ✅ Si no viene code, no intentes exchange (evita el 400)
         const code = url.searchParams.get("code");
         if (!code) {
-          setMsg("Callback sin code. Volviendo al inicio…");
-          router.replace("/");
+          setMsg("Callback sin code. Volviendo a la colección…");
+          router.replace(returnTo);
           return;
         }
 
@@ -39,17 +42,17 @@ export default function Callback() {
 
         if (error) {
           setMsg(`No se pudo finalizar el login: ${error.message}`);
-          router.replace("/auth/login?error=" + encodeURIComponent(error.message));
+          router.replace(`${loginUrl}&error=${encodeURIComponent(error.message)}`);
           return;
         }
 
-        // ✅ sesión OK -> destino real
-        router.replace("/"); // o "/panel" si querés
+        router.replace(returnTo);
       } catch (e) {
         const err =
           e instanceof Error ? e.message : typeof e === "string" ? e : "Error inesperado";
         setMsg(err);
-        router.replace("/auth/login?error=" + encodeURIComponent(err));
+        const returnTo = getSafeAuthReturn(router.query.next);
+        router.replace(`/auth/login?next=${encodeURIComponent(returnTo)}&error=${encodeURIComponent(err)}`);
       }
     };
 

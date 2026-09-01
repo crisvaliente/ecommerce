@@ -9,6 +9,7 @@ import {
   assertPreferenceMatchesPersisted,
   createMercadoPagoPreference,
   getPreferenceResolutionMode,
+  isManualPreferenceRetryAllowed,
   MercadoPagoBridgeError,
   reconcileMercadoPagoPreference,
   recoverMercadoPagoPreference,
@@ -185,6 +186,49 @@ test("definitive provider rejection is failed, not ambiguous", async () => {
     }),
     (error) => error instanceof MercadoPagoBridgeError && !error.ambiguous,
   );
+});
+
+test("timeouts and provider 5xx remain ambiguous and manual retry only accepts empty failed state", async () => {
+  for (const status of [408, 429, 500, 503]) {
+    await assert.rejects(
+      createMercadoPagoPreference({
+        fetchImpl: async () => jsonResponse({ error: "temporary" }, status),
+        accessToken: "token",
+        expected: EXPECTED,
+        notificationUrl: "https://shop.example/webhook",
+        backUrls: { success: "https://shop/s", failure: "https://shop/f", pending: "https://shop/p" },
+      }),
+      (error) => error instanceof MercadoPagoBridgeError && error.ambiguous,
+    );
+  }
+
+  const failed = {
+    preference_id: null,
+    preference_init_point: null,
+    preference_creation_state: "failed",
+    preference_creation_started_at: null,
+  };
+  assert.equal(isManualPreferenceRetryAllowed(failed, true), true);
+  assert.equal(isManualPreferenceRetryAllowed(failed, false), false);
+  assert.equal(isManualPreferenceRetryAllowed({ ...failed, preference_creation_state: "ambiguous" }, true), false);
+  assert.equal(isManualPreferenceRetryAllowed({ ...failed, preference_id: "pref-1" }, true), false);
+  assert.equal(isManualPreferenceRetryAllowed({ ...failed, preference_init_point: "https://mp.example" }, true), false);
+});
+
+test("payment endpoint guards manual failed reset with CAS and preserves the single claimant", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(
+    new URL("../src/pages/api/ecommerce/intento-pago.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /retry_failed_preference === true/);
+  assert.match(source, /isManualPreferenceRetryAllowed\(intento, manualPreferenceRetry\)/);
+  assert.match(source, /\.eq\("preference_creation_state", "failed"\)/);
+  assert.match(source, /\.is\("preference_id", null\)/);
+  assert.match(source, /\.is\("preference_init_point", null\)/);
+  assert.match(source, /\.eq\("preference_creation_state", "not_started"\)/);
+  assert.match(source, /preference_creation_state: "creating"/);
 });
 
 test("network failure after dispatch is ambiguous and never retries inside create", async () => {
