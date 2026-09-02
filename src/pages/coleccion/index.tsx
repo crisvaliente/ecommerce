@@ -4,6 +4,7 @@ import ProductCard from "../../components/ui/ProductCard";
 import { useCart } from "../../components/ui/CartContext";
 import { instanceConfig } from "../../config/instance";
 import { supabaseServer } from "../../lib/supabaseServer";
+import { resolveCanonicalStorefrontEmpresaId } from "../../lib/storefrontTenant";
 import { BUCKET_PRODUCTO_IMAGENES } from "../../utils/storageProductoImagen";
 
 const STOREFRONT_TENANT = instanceConfig.store;
@@ -60,7 +61,6 @@ type PageProps = {
   empresaId: string | null;
   productos: ProductoStorefront[];
   error: string | null;
-  tenantSource: "default" | "query";
 };
 
 function formatStockLabel(stock: number): string {
@@ -69,67 +69,18 @@ function formatStockLabel(stock: number): string {
   return `${stock} unidades disponibles`;
 }
 
-async function resolveEmpresaId(rawEmpresaId: unknown): Promise<{
-  empresaId: string | null;
-  tenantSource: "default" | "query";
-  error: string | null;
-}> {
-  if (typeof rawEmpresaId === "string" && rawEmpresaId.trim().length > 0) {
-    return {
-      empresaId: rawEmpresaId.trim(),
-      tenantSource: "query",
-      error: null,
-    };
-  }
+export const getServerSideProps: GetServerSideProps<PageProps> = async () => {
+  const { empresaId, error: tenantError } = await resolveCanonicalStorefrontEmpresaId(
+    STOREFRONT_TENANT.slug,
+    async (slug) => {
+      const { data, error } = await supabaseServer
+        .from("empresa")
+        .select("id")
+        .eq("slug", slug)
+        .maybeSingle<{ id: string }>();
 
-  const { data: empresaBySlug, error: slugError } = await supabaseServer
-    .from("empresa")
-    .select("id")
-    .eq("slug", STOREFRONT_TENANT.slug)
-    .maybeSingle<{ id: string }>();
-
-  if (slugError) {
-    return {
-      empresaId: null,
-      tenantSource: "default",
-      error: "storefront_tenant_not_found",
-    };
-  }
-
-  if (empresaBySlug?.id) {
-    return {
-      empresaId: empresaBySlug.id,
-      tenantSource: "default",
-      error: null,
-    };
-  }
-
-  const { data: empresaByName, error: nameError } = await supabaseServer
-    .from("empresa")
-    .select("id")
-    .ilike("nombre", STOREFRONT_TENANT.name)
-    .maybeSingle<{ id: string }>();
-
-  if (nameError || !empresaByName?.id) {
-    return {
-      empresaId: null,
-      tenantSource: "default",
-      error: "storefront_tenant_not_found",
-    };
-  }
-
-  return {
-    empresaId: empresaByName.id,
-    tenantSource: "default",
-    error: null,
-  };
-}
-
-export const getServerSideProps: GetServerSideProps<PageProps> = async (
-  context
-) => {
-  const { empresaId, tenantSource, error: tenantError } = await resolveEmpresaId(
-    context.query.empresa_id
+      return { data, error };
+    },
   );
 
   if (!empresaId) {
@@ -138,7 +89,6 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (
         empresaId: null,
         productos: [],
         error: tenantError,
-        tenantSource,
       },
     };
   }
@@ -157,7 +107,6 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (
         empresaId,
         productos: [],
         error: "product_read_failed",
-        tenantSource,
       },
     };
   }
@@ -280,14 +229,13 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (
       empresaId,
       productos,
       error: null,
-      tenantSource,
     },
   };
 };
 
 const ColeccionPage: React.FC<
   InferGetServerSidePropsType<typeof getServerSideProps>
-> = ({ empresaId, productos, error, tenantSource }) => {
+> = ({ empresaId, productos, error }) => {
   const { addItem, empresaId: cartEmpresaId } = useCart();
   const [selectedVarianteByProducto, setSelectedVarianteByProducto] = useState<
     Record<string, string>
@@ -336,13 +284,6 @@ const ColeccionPage: React.FC<
             <p className="mt-2 max-w-xl text-sm leading-5 text-stone-300">
               Elegi un producto disponible y prepara tu carrito.
             </p>
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs sm:text-sm">
-              {tenantSource === "query" && (
-                <span className="rounded-full border border-amber-300/30 bg-amber-200/10 px-2.5 py-1 text-amber-100">
-                  Vista temporal de prueba
-                </span>
-              )}
-            </div>
           </div>
         </section>
 
