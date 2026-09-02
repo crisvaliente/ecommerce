@@ -1,4 +1,6 @@
-# Canonical URL for trusted origins, OAuth callbacks, and Mercado Pago webhooks.
+# Canonical URL for trusted origins, OAuth callbacks, Mercado Pago webhooks, and
+# explicit Gate 2 domain registration. Its direct Host must be preserved by the proxy.
+# Preview aliases and health-check hosts require separate empresa_dominio mappings.
 APP_BASE_URL=http://localhost:3000
 
 # Supabase runtime credentials. Use only values from `supabase status -o env` locally.

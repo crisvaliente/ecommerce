@@ -8,6 +8,7 @@ import {
 } from "../src/config/instance.ts";
 import { assertLocalSupabaseUrl, loadEnvFile, requireEnv } from "./lib/env.mjs";
 import { ensureBootstrapUser } from "./lib/supabase-bootstrap.mjs";
+import { ensureTenantDomain, resolveCanonicalHostname } from "./lib/tenant-domain.mjs";
 
 loadEnvFile();
 
@@ -187,6 +188,7 @@ async function main() {
     "INSTANCE_ADMIN_PASSWORD",
   );
   const adminName = requireEnv("INSTANCE_ADMIN_NAME");
+  const hostname = resolveCanonicalHostname(process.env.APP_BASE_URL);
   const appBaseUrl = getAppBaseUrl();
 
   if (withOptionalSeed) {
@@ -199,6 +201,7 @@ async function main() {
 
   console.log(`[instance-bootstrap] Validated instance ${instanceConfig.instanceKey}.`);
   const { tenant, created: tenantCreated } = await ensureTenant(supabase);
+  const domain = await ensureTenantDomain(supabase, hostname, tenant.id);
   const { user: admin, profile, created: adminCreated } = await ensureBootstrapUser(supabase, {
     email: adminEmail,
     password: adminPassword,
@@ -218,6 +221,7 @@ async function main() {
         app_base_url: appBaseUrl,
         oauth_callback_url: buildOAuthCallbackUrl(appBaseUrl),
         tenant: { id: tenant.id, slug: tenant.slug, created: tenantCreated },
+        tenant_domain: domain,
         first_admin: {
           user_id: admin.id,
           email: admin.email,

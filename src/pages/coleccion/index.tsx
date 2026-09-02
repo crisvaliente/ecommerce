@@ -4,59 +4,13 @@ import ProductCard from "../../components/ui/ProductCard";
 import { useCart } from "../../components/ui/CartContext";
 import { instanceConfig } from "../../config/instance";
 import { supabaseServer } from "../../lib/supabaseServer";
-import { resolveCanonicalStorefrontEmpresaId } from "../../lib/storefrontTenant";
-import { BUCKET_PRODUCTO_IMAGENES } from "../../utils/storageProductoImagen";
+import {
+  loadStorefrontCatalog,
+  resolveStorefrontServerSideProps,
+  type ProductoStorefront,
+} from "../../lib/storefrontCatalog";
 
 const STOREFRONT_TENANT = instanceConfig.store;
-type ProductoEstado = "draft" | "published";
-
-type ProductoRow = {
-  id: string;
-  nombre: string;
-  descripcion: string | null;
-  precio: number;
-  estado: ProductoEstado;
-  stock: number | null;
-};
-
-type StockResumenRow = {
-  producto_id: string;
-  stock_total: number;
-  usa_variantes: boolean;
-};
-
-type ProductoVarianteRow = {
-  id: string;
-  producto_id: string;
-  talle: string;
-  stock: number;
-};
-
-type ProductoVarianteStorefront = {
-  variante_id: string;
-  talle: string;
-  stock: number;
-};
-
-type ImagenProductoRow = {
-  producto_id: string;
-  path: string | null;
-  url_imagen: string | null;
-  es_principal: boolean | null;
-  creado_en: string | null;
-};
-
-type ProductoStorefront = {
-  producto_id: string;
-  nombre: string;
-  descripcion: string | null;
-  precio: number;
-  stock_efectivo: number;
-  usa_variantes: boolean;
-  variantes: ProductoVarianteStorefront[];
-  imagen_url: string | null;
-};
-
 type PageProps = {
   empresaId: string | null;
   productos: ProductoStorefront[];
@@ -69,169 +23,21 @@ function formatStockLabel(stock: number): string {
   return `${stock} unidades disponibles`;
 }
 
-export const getServerSideProps: GetServerSideProps<PageProps> = async () => {
-  const { empresaId, error: tenantError } = await resolveCanonicalStorefrontEmpresaId(
-    STOREFRONT_TENANT.slug,
-    async (slug) => {
+export const getServerSideProps: GetServerSideProps<PageProps> = async (context) =>
+  resolveStorefrontServerSideProps(context, {
+    findByHostname: async (hostname) => {
       const { data, error } = await supabaseServer
-        .from("empresa")
-        .select("id")
-        .eq("slug", slug)
-        .maybeSingle<{ id: string }>();
-
+        .from("empresa_dominio")
+        .select("empresa_id")
+        .eq("hostname", hostname)
+        .maybeSingle<{ empresa_id: string }>();
       return { data, error };
     },
-  );
-
-  if (!empresaId) {
-    return {
-      props: {
-        empresaId: null,
-        productos: [],
-        error: tenantError,
-      },
-    };
-  }
-
-  const { data: productosData, error: productosError } = await supabaseServer
-    .from("producto")
-    .select("id, nombre, descripcion, precio, estado, stock")
-    .eq("empresa_id", empresaId)
-    .eq("estado", "published")
-    .order("nombre", { ascending: true })
-    .returns<ProductoRow[]>();
-
-  if (productosError) {
-    return {
-      props: {
-        empresaId,
-        productos: [],
-        error: "product_read_failed",
-      },
-    };
-  }
-
-  const { data: resumenData } = await supabaseServer
-    .from("producto_stock_resumen")
-    .select("producto_id, stock_total, usa_variantes")
-    .eq("empresa_id", empresaId)
-    .returns<StockResumenRow[]>();
-
-  const resumenMap = new Map<string, StockResumenRow>(
-    (resumenData ?? []).map((row) => [row.producto_id, row])
-  );
-
-  const productoIds = (productosData ?? []).map((producto) => producto.id);
-
-  const { data: variantesData } = productoIds.length > 0
-    ? await supabaseServer
-        .from("producto_variante")
-        .select("id, producto_id, talle, stock")
-        .in("producto_id", productoIds)
-        .eq("activo", true)
-        .order("talle", { ascending: true })
-        .returns<ProductoVarianteRow[]>()
-    : { data: [] as ProductoVarianteRow[] };
-
-  const variantesMap = new Map<string, ProductoVarianteStorefront[]>();
-
-  (variantesData ?? []).forEach((variante) => {
-    if (!(variante.stock > 0)) {
-      return;
-    }
-
-    const current = variantesMap.get(variante.producto_id) ?? [];
-    current.push({
-      variante_id: variante.id,
-      talle: variante.talle,
-      stock: variante.stock,
-    });
-    variantesMap.set(variante.producto_id, current);
-  });
-  let imageMap = new Map<string, string>();
-
-  if (productoIds.length > 0) {
-    const { data: imagenesData } = await supabaseServer
-      .from("imagen_producto")
-      .select("producto_id, path, url_imagen, es_principal, creado_en")
-      .in("producto_id", productoIds)
-      .is("deleted_at", null)
-      .order("es_principal", { ascending: false })
-      .order("creado_en", { ascending: true })
-      .returns<ImagenProductoRow[]>();
-
-    const signedEntries = await Promise.all(
-      (imagenesData ?? []).map(async (imagen) => {
-        const rawPath = imagen.path ?? imagen.url_imagen;
-
-        if (!rawPath) {
-          return null;
-        }
-
-        try {
-          const { data } = await supabaseServer.storage
-            .from(BUCKET_PRODUCTO_IMAGENES)
-            .createSignedUrl(rawPath, 60 * 60);
-
-          if (!data?.signedUrl) {
-            return null;
-          }
-
-          return {
-            producto_id: imagen.producto_id,
-            signedUrl: data.signedUrl,
-          };
-        } catch {
-          return null;
-        }
-      })
-    );
-
-    imageMap = new Map<string, string>(
-      signedEntries
-        .filter((entry): entry is { producto_id: string; signedUrl: string } =>
-          Boolean(entry?.producto_id && entry?.signedUrl)
-        )
-        .filter(
-          (entry, index, entries) =>
-            entries.findIndex((candidate) => candidate.producto_id === entry.producto_id) ===
-            index
-        )
-        .map((entry) => [entry.producto_id, entry.signedUrl])
-    );
-  }
-
-  const productos: ProductoStorefront[] = (productosData ?? [])
-    .map((p) => {
-      const resumen = resumenMap.get(p.id);
-      const stockBase = typeof p.stock === "number" ? p.stock : 0;
-      const variantes = variantesMap.get(p.id) ?? [];
-
-      return {
-        producto_id: p.id,
-        nombre: p.nombre,
-        descripcion: p.descripcion,
-        precio: Number(p.precio),
-        stock_efectivo: resumen?.usa_variantes
-          ? variantes.reduce((total, variante) => total + variante.stock, 0)
-          : typeof resumen?.stock_total === "number"
-            ? resumen.stock_total
-            : stockBase,
-        usa_variantes:
-          typeof resumen?.usa_variantes === "boolean" ? resumen.usa_variantes : false,
-        variantes,
-        imagen_url: imageMap.get(p.id) ?? null,
-      };
-    });
-
-  return {
-    props: {
-      empresaId,
-      productos,
-      error: null,
+    loadCatalog: (empresaId) => loadStorefrontCatalog(empresaId, supabaseServer),
+    logLookupFailure: (hostname) => {
+      console.error("[storefront-tenant] lookup_failed", { hostname });
     },
-  };
-};
+  });
 
 const ColeccionPage: React.FC<
   InferGetServerSidePropsType<typeof getServerSideProps>
@@ -287,7 +93,7 @@ const ColeccionPage: React.FC<
           </div>
         </section>
 
-        {!empresaId && error === "storefront_tenant_not_found" && (
+        {!empresaId && error === "storefront_unavailable" && (
           <section className="mt-4 rounded-[22px] border border-stone-200 bg-white p-4 shadow-sm sm:p-5">
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
               <p className="font-medium">La tienda no esta disponible ahora.</p>

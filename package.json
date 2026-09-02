@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "test:instance-config": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test scripts/instance-config.test.mjs",
     "test:storefront-tenant": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test scripts/storefront-tenant.test.mjs",
+    "test:storefront-tenant:db": "node --test scripts/storefront-tenant-db.test.mjs",
     "test:catalog-stock-isolation:db": "node --test scripts/catalog-stock-isolation-db.test.mjs",
     "test:buyer-checkout": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test scripts/buyer-checkout.test.mjs",
     "test:checkout-idempotency": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test scripts/checkout-idempotency.test.mjs",

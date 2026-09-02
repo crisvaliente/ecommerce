@@ -62,7 +62,7 @@ Use only credentials from the local Supabase stack. Never copy hosted credential
    pnpm bootstrap:instance
    ```
 
-   The command is idempotent, resolves the tenant by `store.slug`, links a real Supabase Auth user as `admin`, and verifies the private product image bucket. It never prints passwords.
+   The command is idempotent, resolves the tenant by `store.slug`, registers the normalized `APP_BASE_URL` hostname without reassigning collisions, links a real Supabase Auth user as `admin`, and verifies the private product image bucket. It never prints passwords.
 
 6. Optionally create an idempotent demo catalog:
 
@@ -91,6 +91,29 @@ pnpm dev
 ```
 
 Open the URL configured in `APP_BASE_URL`.
+
+## Gate 2 tenant domains
+
+Public collection reads select a company only from the direct Node/Next `Host` header and an exact row in the private `public.empresa_dominio` registry. Query/body/cookie values, `Origin`, `Referer`, `X-Forwarded-Host`, `empresa.slug`, aliases, and localhost are never fallbacks. Branding, locale, currency, auth namespace, OAuth, and payment URLs remain instance-wide in v1.
+
+Roll out in this order:
+
+1. Apply migrations and run `pnpm test:storefront-tenant:db`.
+2. Run `pnpm bootstrap:instance`; it registers the normalized `APP_BASE_URL` hostname with a plain collision-safe insert. Register every production, local, preview, alias, and health-check hostname intended to serve the storefront explicitly.
+3. Verify through trusted SQL that each hostname has the intended owner and that anon/authenticated roles cannot enumerate the registry.
+4. Prove on the actual hosting path that the requested custom domain is preserved as exactly one direct Node/Next `Host`. Do not deploy this v1 if only `X-Forwarded-Host` preserves it.
+5. Deploy runtime code, then smoke two mapped hosts, an unknown host (404), conflicting query/forwarding inputs (no tenant change), and an induced registry failure (503 with `Cache-Control: no-store`).
+
+Local two-host probes should avoid wildcard-DNS assumptions:
+
+```bash
+curl --resolve tenant-a.localhost:3000:127.0.0.1 -sS -D /tmp/tenant-a.headers \
+  -o /tmp/tenant-a.html http://tenant-a.localhost:3000/coleccion
+curl --resolve tenant-b.localhost:3000:127.0.0.1 -sS -D /tmp/tenant-b.headers \
+  -o /tmp/tenant-b.html http://tenant-b.localhost:3000/coleccion
+```
+
+Invalid and unknown hosts intentionally return the generic 404. Registry infrastructure failures return a generic unavailable storefront and log only `[storefront-tenant] lookup_failed` plus the safe normalized hostname. If rollout locks out a valid host, correct its mapping or revert the runtime integration first. Retain the additive registry and Gate 1 isolation for diagnosis; never introduce a slug fallback or reassign a collision with upsert.
 
 ## Bootstrap safety
 
