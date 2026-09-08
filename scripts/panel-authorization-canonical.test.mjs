@@ -5,9 +5,19 @@ import { canonicalizePanelAuthorization } from "./lib/panel-authorization-canoni
 
 const SECRET = "secret-do-not-echo";
 const CONTROL = "\u0001control-do-not-echo";
-const validRelation = (content = { ignored: true }, variant = "table") => ({
+const scalarMetadata = {
+  schema: " public ",
+  name: "TaBlE",
+  owner: "rôle",
+  rlsEnabled: true,
+  rlsForced: false,
+};
+const validRelation = (content = { ignored: true }, variant = "table", scalars = scalarMetadata) => ({
   kind: "relation",
-  relation: { variant, content },
+  relation: { variant, content, ...scalars },
+});
+const expectedRelation = (variant = "table", scalars = scalarMetadata) => ({
+  kind: "relation", variant, ...scalars,
 });
 
 function captureFailure(input) {
@@ -36,6 +46,7 @@ const failures = {
   missingField: ["ERR_MISSING_FIELD", "Missing required field."],
   kind: ["ERR_UNKNOWN_KIND", "Unknown kind."],
   variant: ["ERR_UNKNOWN_VARIANT", "Unknown relation variant."],
+  invalidScalar: ["ERR_INVALID_SCALAR", "Expected a valid relation scalar."],
 };
 
 function hostileProxy(target = {}) {
@@ -86,38 +97,72 @@ function assertSnapshot(observed, expected) {
   }
 }
 
-test("accepts a plain relation table and emits only discriminants", () => {
-  assert.deepEqual(canonicalizePanelAuthorization(validRelation()), {
-    kind: "relation", variant: "table",
-  });
+test("accepts enriched relation metadata and retains exact scalars", () => {
+  assert.deepEqual(canonicalizePanelAuthorization(validRelation()), expectedRelation());
 });
 test("accepts null-prototype envelope and relation records", () => {
-  const relation = Object.assign(Object.create(null), { variant: "table", content: null });
+  const relation = Object.assign(Object.create(null), {
+    variant: "table", content: null, ...scalarMetadata,
+  });
   const input = Object.assign(Object.create(null), { kind: "relation", relation });
-  assert.deepEqual(canonicalizePanelAuthorization(input), { kind: "relation", variant: "table" });
+  assert.deepEqual(canonicalizePanelAuthorization(input), expectedRelation());
 });
-test("consumes caller discriminants from the complete descriptor snapshots", () => {
+test("retains whitespace, Unicode, control characters, case, and long strings exactly", () => {
+  const scalars = {
+    schema: " \t ", name: `MiXeD${CONTROL}\n`, owner: "名".repeat(8192),
+    rlsEnabled: false, rlsForced: true,
+  };
+  assert.deepEqual(canonicalizePanelAuthorization(validRelation(null, "view", scalars)), {
+    kind: "relation", variant: "view", ...scalars,
+  });
+});
+for (const [rlsEnabled, rlsForced] of [[false, false], [false, true], [true, false], [true, true]]) {
+  test(`retains RLS boolean combination ${rlsEnabled}/${rlsForced}`, () => {
+    const scalars = { ...scalarMetadata, rlsEnabled, rlsForced };
+    assert.deepEqual(canonicalizePanelAuthorization(validRelation(null, "sequence", scalars)), {
+      kind: "relation", variant: "sequence", ...scalars,
+    });
+  });
+}
+test("returns a new plain record without content, extra keys, or input mutation", () => {
+  const input = validRelation({ opaque: true });
+  const originalRelation = { ...input.relation };
+  const result = canonicalizePanelAuthorization(input);
+  assert.deepEqual(Reflect.ownKeys(result), [
+    "kind", "variant", "schema", "name", "owner", "rlsEnabled", "rlsForced",
+  ]);
+  assert.deepEqual(input, { kind: "relation", relation: originalRelation });
+  assert.equal(Object.getPrototypeOf(result), Object.prototype);
+  assert.notEqual(result, input);
+  assert.notEqual(result, input.relation);
+});
+test("consumes all caller values from the complete descriptor snapshots", () => {
   const input = validRelation();
   const relation = input.relation;
+  const mutations = {
+    schema: "", name: null, owner: 0, rlsEnabled: "true", rlsForced: 1,
+  };
   const originalDescriptor = Reflect.getOwnPropertyDescriptor;
   Reflect.getOwnPropertyDescriptor = (record, key) => {
     const descriptor = originalDescriptor(record, key);
     if (record === input && key === "kind") input.kind = SECRET;
     if (record === relation && key === "variant") relation.variant = CONTROL;
+    if (record === relation && Object.hasOwn(mutations, key)) relation[key] = mutations[key];
     return descriptor;
   };
   try {
-    assert.deepEqual(canonicalizePanelAuthorization(input), { kind: "relation", variant: "table" });
+    assert.deepEqual(canonicalizePanelAuthorization(input), expectedRelation());
   } finally {
     Reflect.getOwnPropertyDescriptor = originalDescriptor;
   }
   assert.equal(input.kind, SECRET);
   assert.equal(relation.variant, CONTROL);
+  for (const [key, value] of Object.entries(mutations)) assert.equal(relation[key], value);
 });
 test("accepts table while hostile content stays opaque and erased", () => {
   const hostile = hostileProxy();
   const result = canonicalizePanelAuthorization(validRelation(hostile.value));
-  assert.deepEqual(result, { kind: "relation", variant: "table" });
+  assert.deepEqual(result, expectedRelation());
   assert.deepEqual(hostile.counts, Object.fromEntries(Object.keys(hostile.counts).map((key) => [key, 0])));
   assert.equal(hostile.coercions(), 0);
   assert.equal(Object.hasOwn(result, "content"), false);
@@ -127,7 +172,7 @@ for (const variant of [
 ]) test(`accepts ${variant} while hostile content stays opaque and erased`, () => {
   const hostile = hostileProxy();
   const result = canonicalizePanelAuthorization(validRelation(hostile.value, variant));
-  assert.deepEqual(result, { kind: "relation", variant });
+  assert.deepEqual(result, expectedRelation(variant));
   assert.deepEqual(hostile.counts, Object.fromEntries(Object.keys(hostile.counts).map((key) => [key, 0])));
   assert.equal(hostile.coercions(), 0);
   assert.equal(Object.hasOwn(result, "content"), false);
@@ -135,7 +180,9 @@ for (const variant of [
 test("snapshots accepted envelope and relation descriptors exactly once", () => {
   const input = validRelation();
   const observed = observeDescriptors(input, [input, input.relation]);
-  assertSnapshot(observed, [[input, ["kind", "relation"]], [input.relation, ["variant", "content"]]]);
+  assertSnapshot(observed, [[input, ["kind", "relation"]], [input.relation, [
+    "variant", "content", "schema", "name", "owner", "rlsEnabled", "rlsForced",
+  ]]]);
   assert.equal(observed.error, undefined);
 });
 test("snapshots every envelope key before early unknown-field rejection", () => {
@@ -202,8 +249,10 @@ for (const [name, build] of [
   ["symbol relation field", () => ({ kind: "relation", relation: { variant: "table", content: null, [Symbol(SECRET)]: CONTROL } })],
   ["non-enumerable envelope field", () => Object.defineProperty(validRelation(), SECRET, { value: CONTROL })],
   ["non-enumerable relation field", () => ({ kind: "relation", relation: Object.defineProperty({ variant: "table", content: null }, SECRET, { value: CONTROL }) })],
+  ["non-enumerable scalar", () => { const input = validRelation(); Object.defineProperty(input.relation, "owner", { enumerable: false, value: "role" }); return input; }],
   ["envelope kind accessor", () => { const input = validRelation(); Object.defineProperty(input, "kind", { enumerable: true, get() { throw new Error(SECRET); } }); return input; }],
   ["relation variant accessor", () => { const relation = { content: null }; Object.defineProperty(relation, "variant", { enumerable: true, get() { throw new Error(SECRET); } }); return { kind: "relation", relation }; }],
+  ["scalar accessor", () => { const input = validRelation(); Object.defineProperty(input.relation, "name", { enumerable: true, get() { throw new Error(SECRET); } }); return input; }],
 ]) test(`rejects invalid field: ${name}`, () => assertFailure(build(), ...failures.field));
 for (const [name, input] of [
   ["unknown envelope field", { ...validRelation(), [SECRET]: CONTROL }],
@@ -215,15 +264,49 @@ for (const [name, input] of [
   ["missing relation variant", { kind: "relation", relation: { content: null } }],
   ["missing relation content", { kind: "relation", relation: { variant: "table" } }],
 ]) test(`rejects missing field: ${name}`, () => assertFailure(input, ...failures.missingField));
+for (const field of ["schema", "name", "owner", "rlsEnabled", "rlsForced"]) {
+  test(`rejects missing required scalar: ${field}`, () => {
+    const input = validRelation();
+    delete input.relation[field];
+    assertFailure(input, ...failures.missingField);
+  });
+}
+const invalidScalarCases = {
+  schema: ["", 7, new String("public")],
+  name: ["", null, {}],
+  owner: ["", undefined, new String("postgres")],
+  rlsEnabled: ["true", 0, 1, new Boolean(true), null, undefined, {}],
+  rlsForced: ["false", 0, 1, new Boolean(false), null, undefined, {}],
+};
+for (const [field, values] of Object.entries(invalidScalarCases)) {
+  test(`rejects invalid scalar: ${field}`, () => {
+    for (const value of values) {
+      const input = validRelation(null, "table", { ...scalarMetadata, [field]: value });
+      assertFailure(input, ...failures.invalidScalar);
+    }
+  });
+}
+test("rejects coercive scalar object without invoking its hook", () => {
+  let coercions = 0;
+  const value = Object.defineProperty({}, Symbol.toPrimitive, {
+    get() { coercions += 1; return () => SECRET; },
+  });
+  assertFailure(validRelation(null, "table", { ...scalarMetadata, name: value }), ...failures.invalidScalar);
+  assert.equal(coercions, 0);
+});
+test("rejects scalar Proxy without invoking reflective or coercion hooks", () => {
+  const hostile = hostileProxy();
+  assertFailure(validRelation(null, "table", { ...scalarMetadata, owner: hostile.value }), ...failures.invalidScalar);
+  assert.deepEqual(hostile.counts, Object.fromEntries(Object.keys(hostile.counts).map((key) => [key, 0])));
+  assert.equal(hostile.coercions(), 0);
+});
 test("rejects unknown kind with stable sentinel-free failure", () => {
   assertFailure({ kind: `${SECRET}${CONTROL}`, relation: { variant: "table", content: null } }, ...failures.kind);
 });
 for (const variant of [
   "partitioned_table", "foreign_table", "sequence", "view", "materialized_view",
 ]) test(`accepts relation variant: ${variant}`, () => {
-  assert.deepEqual(canonicalizePanelAuthorization(validRelation(null, variant)), {
-    kind: "relation", variant,
-  });
+  assert.deepEqual(canonicalizePanelAuthorization(validRelation(null, variant)), expectedRelation(variant));
 });
 test("rejects unknown relation variant with stable sentinel-free failure", () => {
   const variant = `${SECRET}${CONTROL}`;

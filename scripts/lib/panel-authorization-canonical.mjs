@@ -8,6 +8,7 @@ const failures = {
   missingField: ["ERR_MISSING_FIELD", "Missing required field."],
   kind: ["ERR_UNKNOWN_KIND", "Unknown kind."],
   variant: ["ERR_UNKNOWN_VARIANT", "Unknown relation variant."],
+  invalidScalar: ["ERR_INVALID_SCALAR", "Expected a valid relation scalar."],
 };
 const relationVariants = new Set([
   "table", "partitioned_table", "foreign_table", "sequence", "view", "materialized_view",
@@ -64,9 +65,23 @@ export function canonicalizePanelAuthorization(input) {
   if (kind !== "relation") reject(failures.kind);
 
   const relation = snapshotRecord(relationValue);
-  validateSnapshot(relation, new Set(["variant", "content"]), ["variant", "content"], true);
+  validateSnapshot(relation, new Set([
+    "variant", "content", "schema", "name", "owner", "rlsEnabled", "rlsForced",
+  ]), ["variant", "content", "schema", "name", "owner", "rlsEnabled", "rlsForced"], true);
   const variant = relation.descriptors.get("variant").value;
   if (!relationVariants.has(variant)) reject(failures.variant);
 
-  return { kind: "relation", variant };
+  const schema = relation.descriptors.get("schema").value;
+  const name = relation.descriptors.get("name").value;
+  const owner = relation.descriptors.get("owner").value;
+  const rlsEnabled = relation.descriptors.get("rlsEnabled").value;
+  const rlsForced = relation.descriptors.get("rlsForced").value;
+  if (
+    typeof schema !== "string" || schema.length === 0
+    || typeof name !== "string" || name.length === 0
+    || typeof owner !== "string" || owner.length === 0
+    || typeof rlsEnabled !== "boolean"
+    || typeof rlsForced !== "boolean"
+  ) reject(failures.invalidScalar);
+  return { kind: "relation", variant, schema, name, owner, rlsEnabled, rlsForced };
 }
