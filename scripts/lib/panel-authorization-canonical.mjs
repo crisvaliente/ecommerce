@@ -9,6 +9,9 @@ const failures = {
   kind: ["ERR_UNKNOWN_KIND", "Unknown kind."],
   variant: ["ERR_UNKNOWN_VARIANT", "Unknown relation variant."],
 };
+const relationVariants = new Set([
+  "table", "partitioned_table", "foreign_table", "sequence", "view", "materialized_view",
+]);
 
 function reject([code, message]) {
   const error = new Error(message);
@@ -63,7 +66,7 @@ export function canonicalizePanelAuthorization(input) {
   const relation = snapshotRecord(relationValue);
   validateSnapshot(relation, new Set(["variant", "content"]), ["variant", "content"], true);
   const variant = relation.descriptors.get("variant").value;
-  if (variant !== "table") reject(failures.variant);
+  if (!relationVariants.has(variant)) reject(failures.variant);
 
-  return { kind: "relation", variant: "table" };
+  return { kind: "relation", variant };
 }

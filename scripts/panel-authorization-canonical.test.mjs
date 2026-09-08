@@ -5,9 +5,9 @@ import { canonicalizePanelAuthorization } from "./lib/panel-authorization-canoni
 
 const SECRET = "secret-do-not-echo";
 const CONTROL = "\u0001control-do-not-echo";
-const validRelation = (content = { ignored: true }) => ({
+const validRelation = (content = { ignored: true }, variant = "table") => ({
   kind: "relation",
-  relation: { variant: "table", content },
+  relation: { variant, content },
 });
 
 function captureFailure(input) {
@@ -122,6 +122,16 @@ test("accepts table while hostile content stays opaque and erased", () => {
   assert.equal(hostile.coercions(), 0);
   assert.equal(Object.hasOwn(result, "content"), false);
 });
+for (const variant of [
+  "partitioned_table", "foreign_table", "sequence", "view", "materialized_view",
+]) test(`accepts ${variant} while hostile content stays opaque and erased`, () => {
+  const hostile = hostileProxy();
+  const result = canonicalizePanelAuthorization(validRelation(hostile.value, variant));
+  assert.deepEqual(result, { kind: "relation", variant });
+  assert.deepEqual(hostile.counts, Object.fromEntries(Object.keys(hostile.counts).map((key) => [key, 0])));
+  assert.equal(hostile.coercions(), 0);
+  assert.equal(Object.hasOwn(result, "content"), false);
+});
 test("snapshots accepted envelope and relation descriptors exactly once", () => {
   const input = validRelation();
   const observed = observeDescriptors(input, [input, input.relation]);
@@ -209,9 +219,15 @@ test("rejects unknown kind with stable sentinel-free failure", () => {
   assertFailure({ kind: `${SECRET}${CONTROL}`, relation: { variant: "table", content: null } }, ...failures.kind);
 });
 for (const variant of [
-  "partitioned_table", "foreign_table", "sequence", "view", "materialized_view", `${SECRET}${CONTROL}`,
-]) test(`rejects unknown relation variant: ${JSON.stringify(variant)}`, () => {
-  assertFailure({ kind: "relation", relation: { variant, content: null } }, ...failures.variant, [variant, SECRET, CONTROL]);
+  "partitioned_table", "foreign_table", "sequence", "view", "materialized_view",
+]) test(`accepts relation variant: ${variant}`, () => {
+  assert.deepEqual(canonicalizePanelAuthorization(validRelation(null, variant)), {
+    kind: "relation", variant,
+  });
+});
+test("rejects unknown relation variant with stable sentinel-free failure", () => {
+  const variant = `${SECRET}${CONTROL}`;
+  assertFailure(validRelation(null, variant), ...failures.variant, [variant, SECRET, CONTROL]);
 });
 for (const location of ["envelope", "relation"]) test(`rejects ${location} Proxy before reflective traps`, () => {
   const hostile = hostileProxy(location === "envelope" ? validRelation() : { variant: "table", content: null });
