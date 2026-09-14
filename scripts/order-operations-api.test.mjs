@@ -58,16 +58,26 @@ function setup({ role = "staff", rpcData = [transitionResult()], rpcError = null
       return { data: rpcData, error: rpcError };
     },
   };
-  const authorize = authorization ?? (async () => ({
-    ok: true,
-    userId: USER_ID,
-    empresaId: EMPRESA_ID,
-    role,
-    supabaseAdmin,
-  }));
+  const authorizationCalls = [];
+  const authorize = authorization ?? (async (_req, capability) => {
+    authorizationCalls.push(capability);
+    if (role === "staff" && capability === "orders.cancel") {
+      return { ok: false, status: 403, error: "forbidden" };
+    }
+    return {
+      ok: true,
+      principal: {
+        authUserId: USER_ID,
+        profileId: "55555555-5555-4555-8555-555555555555",
+        empresaId: EMPRESA_ID,
+        role,
+      },
+    };
+  });
   return {
     handler: createOrderDetailHandler({
-      authorizePanelAccess: authorize,
+      authorizePanelRequest: authorize,
+      createPanelServiceClient: () => supabaseAdmin,
       applyRateLimitHeaders(res, result) {
         res.setHeader("X-RateLimit-Limit", String(result.limit));
       },
@@ -89,6 +99,7 @@ function setup({ role = "staff", rpcData = [transitionResult()], rpcError = null
       },
     }),
     rpcCalls,
+    authorizationCalls,
   };
 }
 
@@ -168,11 +179,12 @@ test("staff can advance every logistics transition using only the session tenant
   for (const [expectedState, targetState] of transitions) {
     await t.test(`${expectedState} -> ${targetState}`, async () => {
       const result = transitionResult({ estado_anterior: expectedState, estado_final: targetState });
-      const { res, rpcCalls } = await invoke(
+      const { res, rpcCalls, authorizationCalls } = await invoke(
         { body: { expected_state: expectedState, target_state: targetState, motivo: "Packed" } },
         { rpcData: [result] },
       );
       assert.equal(res.statusCode, 200);
+      assert.deepEqual(authorizationCalls, ["orders.operate"]);
       assert.deepEqual(rpcCalls[0], {
         name: "transicionar_pedido_operacional",
         params: {
@@ -207,10 +219,11 @@ test("admin can advance every logistics transition", async (t) => {
 });
 
 test("staff cannot cancel pending payment orders", async () => {
-  const { res, rpcCalls } = await invoke({
+  const { res, rpcCalls, authorizationCalls } = await invoke({
     body: { expected_state: "pendiente_pago", target_state: "cancelado" },
   });
   assert.equal(res.statusCode, 403);
+  assert.deepEqual(authorizationCalls, ["orders.cancel"]);
   assert.equal(rpcCalls.length, 0);
 });
 
@@ -220,8 +233,12 @@ test("admin can safely cancel a pending payment order", async () => {
     estado_anterior: "pendiente_pago",
     estado_final: "cancelado",
   });
-  const { res, rpcCalls } = await invoke({ body }, { role: "admin", rpcData: [result] });
+  const { res, rpcCalls, authorizationCalls } = await invoke(
+    { body },
+    { role: "admin", rpcData: [result] },
+  );
   assert.equal(res.statusCode, 200);
+  assert.deepEqual(authorizationCalls, ["orders.cancel"]);
   assert.equal(rpcCalls.length, 1);
   assert.equal(rpcCalls[0].params.p_empresa_id, EMPRESA_ID);
   assert.equal(rpcCalls[0].params.p_actor_id, USER_ID);

@@ -1,6 +1,9 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { applyRateLimitHeaders, checkRateLimit } from "../../../lib/apiSecurity";
-import { authorizePanelAccess } from "../../../lib/panelAuthorization";
+import {
+  authorizePanelRequest,
+  createPanelServiceClient,
+} from "../../../lib/panelAuthorization";
 
 type PedidoEstado =
   | "pendiente_pago"
@@ -50,16 +53,17 @@ export default async function handler(
     return res.status(429).json({ error: "rate_limit_exceeded" });
   }
 
-  const authorization = await authorizePanelAccess(req);
+  const authorization = await authorizePanelRequest(req, "orders.operate");
   if (authorization.ok === false) {
     return res.status(authorization.status).json({ error: authorization.error });
   }
 
   try {
-    const { data: pedidosData, error: pedidosError } = await authorization.supabaseAdmin
+    const serviceClient = createPanelServiceClient();
+    const { data: pedidosData, error: pedidosError } = await serviceClient
       .from("pedido")
       .select("id, estado, total, creado_en, expira_en, bloqueado_por_stock")
-      .eq("empresa_id", authorization.empresaId)
+      .eq("empresa_id", authorization.principal.empresaId)
       .order("creado_en", { ascending: false })
       .limit(50);
 

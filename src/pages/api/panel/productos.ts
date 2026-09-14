@@ -1,6 +1,9 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { applyRateLimitHeaders, checkRateLimit } from "../../../lib/apiSecurity";
-import { authorizePanelAccess } from "../../../lib/panelAuthorization";
+import {
+  authorizePanelRequest,
+  createPanelServiceClient,
+} from "../../../lib/panelAuthorization";
 
 type ProductoEstado = "draft" | "published";
 
@@ -78,16 +81,17 @@ export default async function handler(
     return res.status(400).json({ error: "empresa_id requerido" });
   }
 
-  const authorization = await authorizePanelAccess(req, empresa_id);
+  const authorization = await authorizePanelRequest(req, "catalog.operate", empresa_id);
   if (authorization.ok === false) {
     return res.status(authorization.status).json({ error: authorization.error });
   }
 
   try {
-    const { data: productosData, error: productosError } = await authorization.supabaseAdmin
+    const serviceClient = createPanelServiceClient();
+    const { data: productosData, error: productosError } = await serviceClient
       .from("producto")
       .select("id, nombre, descripcion, precio, estado, stock")
-      .eq("empresa_id", authorization.empresaId)
+      .eq("empresa_id", authorization.principal.empresaId)
       .order("nombre", { ascending: true })
       .returns<ProductoRow[]>();
 
@@ -95,10 +99,10 @@ export default async function handler(
       return res.status(500).json({ error: "internal_error" });
     }
 
-    const { data: resumenData, error: resumenError } = await authorization.supabaseAdmin
+    const { data: resumenData, error: resumenError } = await serviceClient
       .from("producto_stock_resumen")
       .select("producto_id, stock_total, usa_variantes")
-      .eq("empresa_id", authorization.empresaId)
+      .eq("empresa_id", authorization.principal.empresaId)
       .returns<StockResumenRow[]>();
 
     const resumen_ok = !resumenError;
@@ -137,7 +141,7 @@ export default async function handler(
     return res.status(200).json({
       items,
       meta: {
-        empresa_id: authorization.empresaId,
+        empresa_id: authorization.principal.empresaId,
         source_mode: "tolerante",
         resumen_ok,
         resumen_count: resumenData?.length ?? 0,

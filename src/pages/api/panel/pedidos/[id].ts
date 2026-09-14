@@ -7,7 +7,10 @@ import {
   validateTrustedOrigin,
 } from "../../../../lib/apiSecurity";
 import { createOrderDetailHandler } from "../../../../lib/orderOperationsApi";
-import { authorizePanelAccess } from "../../../../lib/panelAuthorization";
+import {
+  authorizePanelRequest,
+  createPanelServiceClient,
+} from "../../../../lib/panelAuthorization";
 
 type PedidoEstado =
   | "pendiente_pago"
@@ -112,13 +115,14 @@ async function getOrderDetail(
     return res.status(404).json({ error: "pedido_no_encontrado" });
   }
 
-  const authorization = await authorizePanelAccess(req);
+  const authorization = await authorizePanelRequest(req, "orders.operate");
   if (authorization.ok === false) {
     return res.status(authorization.status).json({ error: authorization.error });
   }
 
   try {
-    const { data: pedido, error: pedidoErr } = await authorization.supabaseAdmin
+    const serviceClient = createPanelServiceClient();
+    const { data: pedido, error: pedidoErr } = await serviceClient
       .from("pedido")
       .select(
         `
@@ -135,7 +139,7 @@ async function getOrderDetail(
         `
       )
       .eq("id", pedidoIdTrimmed)
-      .eq("empresa_id", authorization.empresaId)
+      .eq("empresa_id", authorization.principal.empresaId)
       .maybeSingle();
 
     if (pedidoErr) {
@@ -147,7 +151,7 @@ async function getOrderDetail(
       return res.status(404).json({ error: "pedido_no_encontrado" });
     }
 
-    const { data: items, error: itemsErr } = await authorization.supabaseAdmin
+    const { data: items, error: itemsErr } = await serviceClient
       .from("pedido_item")
       .select(
         `
@@ -167,7 +171,7 @@ async function getOrderDetail(
       logPanelError("pedido_items_lookup", itemsErr);
     }
 
-    const { data: intentosPago, error: intentoPagoErr } = await authorization.supabaseAdmin
+    const { data: intentosPago, error: intentoPagoErr } = await serviceClient
       .from("intento_pago")
       .select(
         "id, estado, canal_pago, external_id, preference_id, notificado_en, ultimo_evento_tipo, ultimo_evento_payload, creado_en, actualizado_en"
@@ -243,18 +247,12 @@ async function getOrderDetail(
 }
 
 export default createOrderDetailHandler({
-  authorizePanelAccess: async (req) => {
-    const authorization = await authorizePanelAccess(req as NextApiRequest);
-    if (authorization.ok === false) {
-      return authorization;
-    }
-
+  authorizePanelRequest: (req, requiredCapability) =>
+    authorizePanelRequest(req as NextApiRequest, requiredCapability),
+  createPanelServiceClient: () => {
+    const serviceClient = createPanelServiceClient();
     return {
-      ...authorization,
-      supabaseAdmin: {
-        rpc: async (name: string, params: Record<string, unknown>) =>
-          authorization.supabaseAdmin.rpc(name, params),
-      },
+      rpc: (name: string, params: Record<string, unknown>) => serviceClient.rpc(name, params),
     };
   },
   applyRateLimitHeaders,
