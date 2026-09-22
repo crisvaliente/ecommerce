@@ -4,58 +4,14 @@ import { createHmac, randomUUID } from "node:crypto";
 import test from "node:test";
 
 import { createClient } from "@supabase/supabase-js";
-
-function localSupabaseEnv() {
-  const output = execFileSync("pnpm", ["exec", "supabase", "status", "-o", "env"], {
-    encoding: "utf8",
-  });
-  return Object.fromEntries(
-    output
-      .split("\n")
-      .map((line) => line.match(/^([A-Z_]+)="(.*)"$/))
-      .filter(Boolean)
-      .map((match) => [match[1], match[2]]),
-  );
-}
-
-function assertDisposableLocalSupabase(env) {
-  assert.equal(
-    process.env.ALLOW_LOCAL_SUPABASE_MUTATIONS,
-    "1",
-    "set ALLOW_LOCAL_SUPABASE_MUTATIONS=1 to run disposable local database tests",
-  );
-
-  const apiUrl = new URL(env.API_URL);
-  const restUrl = new URL(env.REST_URL);
-  assert.equal(apiUrl.protocol, "http:", "local Supabase API must use HTTP");
-  assert.equal(apiUrl.hostname, "127.0.0.1", "local Supabase API must use the loopback address");
-  assert.equal(apiUrl.port, "55491", "local Supabase API must use the ecommerce port");
-  assert.equal(restUrl.origin, apiUrl.origin, "REST and API origins must match");
-  assert.equal(restUrl.pathname, "/rest/v1", "unexpected local Supabase REST path");
-
-  const identity = execFileSync(
-    "docker",
-    [
-      "inspect",
-      "--format",
-      "{{.Name}}|{{.Config.Image}}|{{json .NetworkSettings.Ports}}",
-      "supabase_db_ecommerce",
-    ],
-    { encoding: "utf8" },
-  ).trim();
-  const [name, image, portsJson] = identity.split("|");
-  assert.equal(name, "/supabase_db_ecommerce", "unexpected local database container");
-  assert.equal(
-    image,
-    "public.ecr.aws/supabase/postgres:15.8.1.085",
-    "unexpected local database image",
-  );
-  const databasePorts = JSON.parse(portsJson)["5432/tcp"] ?? [];
-  assert.ok(
-    databasePorts.some(({ HostPort }) => HostPort === "55476"),
-    "local database container is not bound to the ecommerce port",
-  );
-}
+import {
+  createCleanupRegistry,
+  createTrackedAuthProfile,
+  createTrackedCompany,
+  loadGuardedLocalSupabase,
+  runTrackedSetup,
+  trackedInsert,
+} from "./lib/local-auth-fixtures.mjs";
 
 function localDbQuery(sql) {
   return execFileSync(
@@ -89,119 +45,58 @@ function authenticatedClient(env, userId) {
   });
 }
 
-const env = localSupabaseEnv();
-assertDisposableLocalSupabase(env);
-const service = createClient(env.API_URL, env.SERVICE_ROLE_KEY, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
+const { env, service } = loadGuardedLocalSupabase();
 
 async function createTenantFixture(label, stock) {
-  const empresaId = randomUUID();
-  const authUserId = randomUUID();
-  const profileId = randomUUID();
-  const productId = randomUUID();
-  const variantId = randomUUID();
-
-  const { error: empresaError } = await service.from("empresa").insert({
-    id: empresaId,
-    nombre: `Isolation ${label}`,
-    slug: `isolation-${label.toLowerCase()}-${empresaId}`,
+  const registry = createCleanupRegistry();
+  return runTrackedSetup(registry, async () => {
+    const empresaId = await createTrackedCompany(service, registry, `isolation-${label}`);
+    const identity = await createTrackedAuthProfile(service, registry, {
+      label: `isolation-${label}`,
+      empresaId,
+      role: "admin",
+      onboarding: false,
+    });
+    const productId = randomUUID();
+    const variantId = randomUUID();
+    await trackedInsert(service, registry, "producto", {
+      id: productId,
+      nombre: `Isolation Product ${label}`,
+      descripcion: "Cross-tenant stock regression fixture",
+      precio: 100,
+      stock: 0,
+      empresa_id: empresaId,
+      estado: "published",
+      usa_variantes: true,
+    });
+    await trackedInsert(service, registry, "producto_variante", {
+      id: variantId,
+      empresa_id: empresaId,
+      producto_id: productId,
+      talle: `Size ${label}`,
+      stock,
+      activo: true,
+    });
+    return { empresaId, ...identity, productId, variantId, stock, registry };
   });
-  assert.ifError(empresaError);
-
-  const { error: userError } = await service.from("usuario").insert({
-    id: profileId,
-    supabase_uid: authUserId,
-    nombre: `Isolation ${label}`,
-    correo: `isolation-${authUserId}@example.test`,
-    rol: "admin",
-    empresa_id: empresaId,
-    onboarding: false,
-  });
-  assert.ifError(userError);
-
-  const { error: productError } = await service.from("producto").insert({
-    id: productId,
-    nombre: `Isolation Product ${label}`,
-    descripcion: "Cross-tenant stock regression fixture",
-    precio: 100,
-    stock: 0,
-    empresa_id: empresaId,
-    estado: "published",
-    usa_variantes: true,
-  });
-  assert.ifError(productError);
-
-  const { error: variantError } = await service.from("producto_variante").insert({
-    id: variantId,
-    empresa_id: empresaId,
-    producto_id: productId,
-    talle: `Size ${label}`,
-    stock,
-    activo: true,
-  });
-  assert.ifError(variantError);
-
-  return { empresaId, authUserId, profileId, productId, variantId, stock };
 }
 
-async function cleanupFixture(fixture, cleanupErrors = []) {
-  for (const [table, id] of [
-    ["producto_variante", fixture.variantId],
-    ["producto", fixture.productId],
-    ["usuario", fixture.profileId],
-    ["empresa", fixture.empresaId],
-  ]) {
-    const { error } = await service.from(table).delete().eq("id", id);
-    if (error) cleanupErrors.push(`${table}:${error.code ?? "unknown"}`);
-  }
-}
-
-async function createAuthIdentity(userId) {
-  const { error } = await service.auth.admin.createUser({
-    id: userId,
-    email: `isolation-${userId}@example.test`,
-    email_confirm: true,
-  });
-  assert.ifError(error);
-}
-
-async function createProfile(authUserId, empresaId, label) {
-  const profileId = randomUUID();
-  const { error } = await service.from("usuario").insert({
-    id: profileId,
-    supabase_uid: authUserId,
-    nombre: `Isolation ${label}`,
-    correo: `isolation-${authUserId}@example.test`,
-    rol: "admin",
-    empresa_id: empresaId,
-    onboarding: empresaId === null,
-  });
-  assert.ifError(error);
-  return profileId;
+async function cleanupFixture(fixture) {
+  await fixture.registry.cleanup();
 }
 
 test("PostgREST empresa SELECT uses only canonical usuario tenancy", async () => {
   const tenantA = await createTenantFixture("Empresa A", 13);
   const tenantB = await createTenantFixture("Empresa B", 31);
-  const legacyOwnerId = randomUUID();
-  const legacyCreatorId = randomUUID();
-  const nullCompanyUserId = randomUUID();
-  const authFixtureIds = [
-    tenantA.authUserId,
-    tenantB.authUserId,
-    legacyOwnerId,
-    legacyCreatorId,
-  ];
-  const createdAuthUserIds = [];
-  let nullCompanyProfileId;
+  const extraRegistry = createCleanupRegistry();
+  const legacyOwner = await createTrackedAuthProfile(service, extraRegistry, { label: "legacy-owner" });
+  const legacyCreator = await createTrackedAuthProfile(service, extraRegistry, { label: "legacy-creator" });
+  const nullCompany = await createTrackedAuthProfile(service, extraRegistry, { label: "null-company" });
+  const legacyOwnerId = legacyOwner.authUserId;
+  const legacyCreatorId = legacyCreator.authUserId;
+  const nullCompanyUserId = nullCompany.authUserId;
 
   try {
-    for (const authUserId of authFixtureIds) {
-      await createAuthIdentity(authUserId);
-      createdAuthUserIds.push(authUserId);
-    }
-
     const { error: legacyFieldsError } = await service
       .from("empresa")
       .upsert([
@@ -221,7 +116,6 @@ test("PostgREST empresa SELECT uses only canonical usuario tenancy", async () =>
         },
       ]);
     assert.ifError(legacyFieldsError);
-    nullCompanyProfileId = await createProfile(nullCompanyUserId, null, "Null Company");
 
     const fixtureIds = [tenantA.empresaId, tenantB.empresaId];
     const expectedByUser = [
@@ -268,30 +162,14 @@ test("PostgREST empresa SELECT uses only canonical usuario tenancy", async () =>
     assert.ifError(trustedError);
     assert.deepEqual(new Set(trustedRows.map(({ id }) => id)), new Set(fixtureIds));
   } finally {
-    const cleanupErrors = [];
-    if (nullCompanyProfileId) {
-      const { error } = await service.from("usuario").delete().eq("id", nullCompanyProfileId);
-      if (error) cleanupErrors.push(`usuario:${error.code ?? "unknown"}`);
-    }
-    const { error: authProfilesError } = await service
-      .from("usuario")
-      .delete()
-      .in("supabase_uid", authFixtureIds);
-    if (authProfilesError) cleanupErrors.push(`usuario:${authProfilesError.code ?? "unknown"}`);
-
     const { error: legacyFieldsError } = await service
       .from("empresa")
       .update({ owner_auth: null, created_by: null })
       .in("id", [tenantA.empresaId, tenantB.empresaId]);
-    if (legacyFieldsError) cleanupErrors.push(`empresa:${legacyFieldsError.code ?? "unknown"}`);
-
-    await cleanupFixture(tenantA, cleanupErrors);
-    await cleanupFixture(tenantB, cleanupErrors);
-    for (const authUserId of createdAuthUserIds) {
-      const { error } = await service.auth.admin.deleteUser(authUserId);
-      if (error) cleanupErrors.push(`auth.users:${error.code ?? "unknown"}`);
-    }
-    assert.deepEqual(cleanupErrors, [], `fixture cleanup failed: ${cleanupErrors.join(", ")}`);
+    assert.ifError(legacyFieldsError);
+    await extraRegistry.cleanup();
+    await cleanupFixture(tenantA);
+    await cleanupFixture(tenantB);
   }
 });
 

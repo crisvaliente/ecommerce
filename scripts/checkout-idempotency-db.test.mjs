@@ -4,115 +4,49 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 
 import { createClient } from "@supabase/supabase-js";
+import {
+  createCleanupRegistry,
+  createTrackedAuthProfile,
+  createTrackedCompany,
+  loadGuardedLocalSupabase,
+  runTrackedSetup,
+  trackedInsert,
+} from "./lib/local-auth-fixtures.mjs";
 
-function localSupabaseEnv() {
-  const output = execFileSync("pnpm", ["exec", "supabase", "status", "-o", "env"], {
-    encoding: "utf8",
-  });
-  return Object.fromEntries(
-    output
-      .split("\n")
-      .map((line) => line.match(/^([A-Z_]+)="(.*)"$/))
-      .filter(Boolean)
-      .map((match) => [match[1], match[2]]),
-  );
-}
-
-const env = localSupabaseEnv();
-const service = createClient(env.API_URL, env.SERVICE_ROLE_KEY, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
+const { env, service } = loadGuardedLocalSupabase();
 const anon = createClient(env.API_URL, env.ANON_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
 async function fixture() {
-  const { data: addresses, error: addressError } = await service
-    .from("direccion_usuario")
-    .select("id, usuario_id")
-    .limit(20);
-  assert.ifError(addressError);
-  const distinctAddresses = [];
-  for (const address of addresses ?? []) {
-    if (!distinctAddresses.some((item) => item.usuario_id === address.usuario_id)) {
-      distinctAddresses.push(address);
-    }
-  }
-  const createdUserIds = [];
-  while (distinctAddresses.length < 2) {
-    const userId = randomUUID();
-    const supabaseUid = randomUUID();
-    const { data: user, error: userError } = await service
-      .from("usuario")
-      .insert({
-        id: userId,
-        supabase_uid: supabaseUid,
-        nombre: "Checkout Idempotency Test",
-        correo: `checkout-${userId}@example.test`,
-        rol: "cliente",
-        empresa_id: null,
-        onboarding: true,
-      })
-      .select("id")
-      .single();
-    assert.ifError(userError);
-    createdUserIds.push(user.id);
-
-    const { data: address, error: insertAddressError } = await service
-      .from("direccion_usuario")
-      .insert({
-        usuario_id: user.id,
-        direccion: "Test 123",
+  const registry = createCleanupRegistry();
+  return runTrackedSetup(registry, async () => {
+    const empresaId = await createTrackedCompany(service, registry, "checkout-idempotency");
+    const addresses = [];
+    for (const label of ["buyer-a", "buyer-b"]) {
+      const identity = await createTrackedAuthProfile(service, registry, { label });
+      const address = await trackedInsert(service, registry, "direccion_usuario", {
+        usuario_id: identity.profileId,
+        direccion: `Test ${label}`,
         ciudad: "Montevideo",
         pais: "Uruguay",
         codigo_postal: "11000",
         tipo_direccion: "hogar",
-      })
-      .select("id, usuario_id")
-      .single();
-    assert.ifError(insertAddressError);
-    distinctAddresses.push(address);
-  }
-
-  let createdEmpresaId = null;
-  let { data: product, error: productError } = await service
-    .from("producto")
-    .select("id, empresa_id")
-    .eq("usa_variantes", false)
-    .gt("stock", 0)
-    .limit(1)
-    .maybeSingle();
-  assert.ifError(productError);
-
-  if (!product) {
-    const empresaId = randomUUID();
-    const { error: empresaError } = await service.from("empresa").insert({
-      id: empresaId,
-      nombre: "Checkout Idempotency Test Store",
-      slug: `checkout-${empresaId}`,
+      });
+      addresses.push({ id: address.id, usuario_id: identity.profileId });
+    }
+    const product = await trackedInsert(service, registry, "producto", {
+      id: randomUUID(),
+      nombre: "Checkout Idempotency Product",
+      descripcion: "Local transactional test fixture",
+      precio: 1250,
+      stock: 100,
+      empresa_id: empresaId,
+      estado: "published",
+      usa_variantes: false,
     });
-    assert.ifError(empresaError);
-    createdEmpresaId = empresaId;
-
-    const { data: insertedProduct, error: insertProductError } = await service
-      .from("producto")
-      .insert({
-        id: randomUUID(),
-        nombre: "Checkout Idempotency Product",
-        descripcion: "Local transactional test fixture",
-        precio: 1250,
-        stock: 100,
-        empresa_id: empresaId,
-        estado: "published",
-        usa_variantes: false,
-      })
-      .select("id, empresa_id")
-      .single();
-    assert.ifError(insertProductError);
-    product = insertedProduct;
-  }
-
-  return { addresses: distinctAddresses, product, createdUserIds, createdEmpresaId };
+    return { addresses, product: { id: product.id, empresa_id: empresaId }, registry };
+  });
 }
 
 function rpcParams({ address, product, key, fingerprint, productId = product.id }) {
@@ -141,7 +75,7 @@ async function cleanup(pedidoIds) {
 }
 
 test("order wrapper is idempotent across replay, concurrency, ambiguity and users", async () => {
-  const { addresses, product, createdUserIds, createdEmpresaId } = await fixture();
+  const { addresses, product, registry } = await fixture();
   const createdPedidos = [];
 
   try {
@@ -225,19 +159,12 @@ test("order wrapper is idempotent across replay, concurrency, ambiguity and user
     assert.equal(recoveredResponse.reutilizado, true);
   } finally {
     await cleanup(createdPedidos);
-    if (createdUserIds.length > 0) {
-      const { error } = await service.from("usuario").delete().in("id", createdUserIds);
-      assert.ifError(error);
-    }
-    if (createdEmpresaId) {
-      const { error } = await service.from("empresa").delete().eq("id", createdEmpresaId);
-      assert.ifError(error);
-    }
+    await registry.cleanup();
   }
 });
 
 test("preference persistence is conditional and preference_id is globally unique", async () => {
-  const { addresses, product, createdUserIds, createdEmpresaId } = await fixture();
+  const { addresses, product, registry } = await fixture();
   const createdPedidos = [];
 
   try {
@@ -347,14 +274,7 @@ test("preference persistence is conditional and preference_id is globally unique
     assert.equal(staleReconciled.preference_creation_state, "ambiguous");
   } finally {
     await cleanup(createdPedidos);
-    if (createdUserIds.length > 0) {
-      const { error } = await service.from("usuario").delete().in("id", createdUserIds);
-      assert.ifError(error);
-    }
-    if (createdEmpresaId) {
-      const { error } = await service.from("empresa").delete().eq("id", createdEmpresaId);
-      assert.ifError(error);
-    }
+    await registry.cleanup();
   }
 });
 

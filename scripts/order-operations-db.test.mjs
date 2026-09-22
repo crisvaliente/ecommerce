@@ -4,19 +4,13 @@ import { createHmac, randomUUID } from "node:crypto";
 import test from "node:test";
 
 import { createClient } from "@supabase/supabase-js";
-
-function localSupabaseEnv() {
-  const output = execFileSync("pnpm", ["exec", "supabase", "status", "-o", "env"], {
-    encoding: "utf8",
-  });
-  return Object.fromEntries(
-    output
-      .split("\n")
-      .map((line) => line.match(/^([A-Z_]+)="(.*)"$/))
-      .filter(Boolean)
-      .map((match) => [match[1], match[2]]),
-  );
-}
+import {
+  createCleanupRegistry,
+  createTrackedAuthProfile,
+  loadGuardedLocalSupabase,
+  runTrackedSetup,
+  trackedInsert,
+} from "./lib/local-auth-fixtures.mjs";
 
 function authenticatedJwt(secret) {
   const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -31,10 +25,7 @@ function authenticatedJwt(secret) {
   return `${header}.${payload}.${signature}`;
 }
 
-const env = localSupabaseEnv();
-const service = createClient(env.API_URL, env.SERVICE_ROLE_KEY, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
+const { env, service } = loadGuardedLocalSupabase();
 const anon = createClient(env.API_URL, env.ANON_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
@@ -92,59 +83,51 @@ function delay(milliseconds) {
 }
 
 async function createFixture() {
-  const empresaId = randomUUID();
-  const otherEmpresaId = randomUUID();
-  const userId = randomUUID();
-  const actorId = randomUUID();
-  const productId = randomUUID();
+  const registry = createCleanupRegistry();
+  return runTrackedSetup(registry, async () => {
+    const empresaId = randomUUID();
+    const otherEmpresaId = randomUUID();
+    const actorId = randomUUID();
+    const productId = randomUUID();
 
-  for (const [id, name] of [[empresaId, "Order Operations"], [otherEmpresaId, "Other Tenant"]]) {
-    const { error } = await service.from("empresa").insert({
-      id,
-      nombre: `${name} Test`,
-      slug: `order-ops-${id}`,
+    for (const [id, name] of [[empresaId, "Order Operations"], [otherEmpresaId, "Other Tenant"]]) {
+      await trackedInsert(service, registry, "empresa", {
+        id,
+        nombre: `${name} Test`,
+        slug: `order-ops-${id}`,
+      });
+    }
+
+    const identity = await createTrackedAuthProfile(service, registry, {
+      label: `order-operations-${empresaId}`,
+      empresaId,
+      role: "cliente",
+      onboarding: true,
     });
-    assert.ifError(error);
-  }
+    const userId = identity.profileId;
 
-  const { error: userError } = await service.from("usuario").insert({
-    id: userId,
-    supabase_uid: randomUUID(),
-    nombre: "Order Operations Buyer",
-    correo: `order-ops-${userId}@example.test`,
-    rol: "cliente",
-    empresa_id: empresaId,
-    onboarding: true,
-  });
-  assert.ifError(userError);
-
-  const { data: address, error: addressError } = await service
-    .from("direccion_usuario")
-    .insert({
+    const address = await trackedInsert(service, registry, "direccion_usuario", {
       usuario_id: userId,
       direccion: "Test 123",
       ciudad: "Montevideo",
       pais: "Uruguay",
       codigo_postal: "11000",
       tipo_direccion: "hogar",
-    })
-    .select("id")
-    .single();
-  assert.ifError(addressError);
+    });
 
-  const { error: productError } = await service.from("producto").insert({
-    id: productId,
-    nombre: "Order Operations Product",
-    descripcion: "Transactional order state fixture",
-    precio: 100,
-    stock: 99,
-    empresa_id: empresaId,
-    estado: "published",
-    usa_variantes: false,
+    await trackedInsert(service, registry, "producto", {
+      id: productId,
+      nombre: "Order Operations Product",
+      descripcion: "Transactional order state fixture",
+      precio: 100,
+      stock: 99,
+      empresa_id: empresaId,
+      estado: "published",
+      usa_variantes: false,
+    });
+
+    return { empresaId, otherEmpresaId, userId, actorId, productId, addressId: address.id, registry };
   });
-  assert.ifError(productError);
-
-  return { empresaId, otherEmpresaId, userId, actorId, productId, addressId: address.id };
 }
 
 async function createOrder(fixture, state = "pendiente_pago") {
@@ -229,17 +212,7 @@ async function eventCount(pedidoId) {
 async function cleanup(fixture) {
   const { error: ordersError } = await service.from("pedido").delete().eq("empresa_id", fixture.empresaId);
   assert.ifError(ordersError);
-  const { error: productError } = await service.from("producto").delete().eq("id", fixture.productId);
-  assert.ifError(productError);
-  const { error: addressError } = await service.from("direccion_usuario").delete().eq("id", fixture.addressId);
-  assert.ifError(addressError);
-  const { error: userError } = await service.from("usuario").delete().eq("id", fixture.userId);
-  assert.ifError(userError);
-  const { error: companiesError } = await service
-    .from("empresa")
-    .delete()
-    .in("id", [fixture.empresaId, fixture.otherEmpresaId]);
-  assert.ifError(companiesError);
+  await fixture.registry.cleanup();
 }
 
 async function withFixture(run) {
