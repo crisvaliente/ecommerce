@@ -38,7 +38,6 @@ type ProductoPanelDTO = {
 type ApiOk = {
   items: ProductoPanelDTO[];
   meta: {
-    empresa_id: string;
     source_mode: "tolerante";
     resumen_ok: boolean;
     resumen_count: number;
@@ -86,9 +85,7 @@ const ProductosPage: React.FC = () => {
         return;
       }
 
-      const url = `/api/panel/productos?empresa_id=${encodeURIComponent(
-        dbUser.empresa_id
-      )}`;
+      const url = "/api/panel/productos";
 
       const r = await fetch(url, {
         method: "GET",

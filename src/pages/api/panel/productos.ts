@@ -37,7 +37,6 @@ type ProductoPanelDTO = {
 type ApiOk = {
   items: ProductoPanelDTO[];
   meta: {
-    empresa_id: string;
     source_mode: "tolerante";
     resumen_ok: boolean;
     resumen_count: number;
@@ -46,14 +45,6 @@ type ApiOk = {
 };
 
 type ApiErr = { error: string };
-
-function getEmpresaId(req: NextApiRequest): string | null {
-  const raw = req.query.empresa_id;
-  const empresa_id = Array.isArray(raw) ? raw[0] : raw;
-  if (!empresa_id || typeof empresa_id !== "string") return null;
-  const trimmed = empresa_id.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
 
 export default async function handler(
   req: NextApiRequest,
@@ -76,12 +67,11 @@ export default async function handler(
     return res.status(429).json({ error: "rate_limit_exceeded" });
   }
 
-  const empresa_id = getEmpresaId(req);
-  if (!empresa_id) {
-    return res.status(400).json({ error: "empresa_id requerido" });
+  if (Object.prototype.hasOwnProperty.call(req.query, "empresa_id")) {
+    return res.status(400).json({ error: "legacy_tenant_input" });
   }
 
-  const authorization = await authorizePanelRequest(req, "catalog.operate", empresa_id);
+  const authorization = await authorizePanelRequest(req, "catalog.operate");
   if (authorization.ok === false) {
     return res.status(authorization.status).json({ error: authorization.error });
   }
@@ -141,7 +131,6 @@ export default async function handler(
     return res.status(200).json({
       items,
       meta: {
-        empresa_id: authorization.principal.empresaId,
         source_mode: "tolerante",
         resumen_ok,
         resumen_count: resumenData?.length ?? 0,
