@@ -39,6 +39,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   // Anti-race en Strict Mode
   const didInit = useRef(false);
   const mountedRef = useRef(true);
+  const loadVersionRef = useRef(0);
 
   useEffect(
     () => () => {
@@ -57,7 +58,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   /** ✅ ensureProfile estable (usada dentro de load) */
   const ensureProfile = useCallback(
-    async (u: User): Promise<CustomUser | null> => {
+    async (
+      u: User,
+      isCurrentLoad: () => boolean
+    ): Promise<CustomUser | null> => {
       const emailLower = u.email ? u.email.toLowerCase() : null;
 
       // Nombre desde metadata (Google u otros providers)
@@ -80,6 +84,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return null;
       }
       if (existing) return existing as CustomUser;
+      if (!isCurrentLoad()) return null;
 
       // crear
       const { data: inserted, error: insErr } = await supabase
@@ -111,6 +116,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   /** ✅ load estable (usada en effect y expuesta como refresh) */
   const load = useCallback(async () => {
+    const loadVersion = ++loadVersionRef.current;
+    const isCurrentLoad = () =>
+      mountedRef.current && loadVersionRef.current === loadVersion;
+
     safeSet(setLoading, true);
 
     // 1) Sesión actual
@@ -118,6 +127,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       data: { session },
       error: sErr,
     } = await supabase.auth.getSession();
+    if (!isCurrentLoad()) return;
     if (sErr) console.debug("[auth] getSession error:", sErr);
 
     const u = session?.user ?? null;
@@ -136,13 +146,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       .select("id, supabase_uid, nombre, correo, rol, empresa_id")
       .eq("supabase_uid", u.id)
       .maybeSingle();
+    if (!isCurrentLoad()) return;
 
     if (error) console.debug("[auth] fetch usuario error:", error);
 
     let profile: CustomUser | null = (data as CustomUser) ?? null;
 
     // 4) Autocrear si falta
-    if (!profile) profile = await ensureProfile(u);
+    if (!profile) profile = await ensureProfile(u, isCurrentLoad);
+    if (!isCurrentLoad()) return;
 
     // 5) Setear estado
     safeSet(setDbUser, profile);
@@ -171,9 +183,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   // ✅ signOut estable
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
+    ++loadVersionRef.current;
     safeSet(setSessionUser, null);
     safeSet(setDbUser, null);
+    safeSet(setLoading, false);
+    await supabase.auth.signOut();
   }, [safeSet]);
 
   // ✅ Memo incluye load y signOut
