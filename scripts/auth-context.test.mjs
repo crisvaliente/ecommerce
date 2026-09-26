@@ -22,6 +22,8 @@ function createHarness() {
   let hookIndex = 0;
   let latestValue;
   let authListener;
+  const activeSubscriptions = new Set();
+  let nextSubscriptionId = 0;
   const sessions = [];
   const profiles = [];
   const signOuts = [];
@@ -55,7 +57,15 @@ function createHarness() {
       getSession() { return sessions.shift().promise; },
       onAuthStateChange(listener) {
         authListener = listener;
-        return { data: { subscription: { unsubscribe() {} } } };
+        const id = nextSubscriptionId++;
+        activeSubscriptions.add(id);
+        return {
+          data: {
+            subscription: {
+              unsubscribe() { activeSubscriptions.delete(id); },
+            },
+          },
+        };
       },
       signOut() { return signOuts.shift()?.promise ?? Promise.resolve({ error: null }); },
     },
@@ -110,8 +120,15 @@ function createHarness() {
     queriedUids,
     inserts,
     render,
+    replayEffects() {
+      effects.forEach((entry) => {
+        entry?.cleanup?.();
+        entry.cleanup = entry?.effect();
+      });
+    },
     unmount() { effects.forEach((entry) => entry?.cleanup?.()); },
     authEvent(session) { authListener("TOKEN_REFRESHED", session); },
+    get activeSubscriptionCount() { return activeSubscriptions.size; },
     get value() { return latestValue; },
     get state() { return { loading: states[0], sessionUser: states[1], dbUser: states[2] }; },
   };
@@ -122,6 +139,75 @@ const session = (id) => ({ data: { session: { user: user(id) } }, error: null })
 const profile = (id) => ({ data: { id: `profile-${id}`, supabase_uid: id, nombre: null, correo: null, rol: "cliente", empresa_id: null }, error: null });
 const settled = (value) => ({ promise: Promise.resolve(value) });
 const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+// This simulated callback-order proof is not real React/browser scheduling or StrictMode integration.
+test("effect replay keeps one subscription and finishes its replacement load", async () => {
+  const harness = createHarness();
+  const staleSession = deferred();
+  const staleProfile = settled(profile("account-stale"));
+  const currentSession = deferred();
+  const currentProfile = deferred();
+  harness.sessions.push(staleSession, currentSession);
+  harness.profiles.push(currentProfile);
+
+  harness.render();
+  harness.replayEffects();
+  assert.equal(harness.activeSubscriptionCount, 1);
+
+  currentSession.resolve(session("account-current"));
+  await currentSession.promise;
+  currentProfile.resolve(profile("account-current"));
+  await currentProfile.promise;
+  await flush();
+  harness.render();
+  assert.equal(harness.value.dbUser.supabase_uid, "account-current");
+  assert.equal(harness.value.loading, false);
+
+  harness.profiles.push(staleProfile);
+  staleSession.resolve(session("account-stale"));
+  await staleSession.promise;
+  await flush();
+  harness.render();
+  assert.equal(harness.value.sessionUser.id, "account-current");
+  assert.equal(harness.value.dbUser.supabase_uid, "account-current");
+  assert.equal(harness.value.loading, false);
+  assert.equal(harness.activeSubscriptionCount, 1);
+
+  harness.unmount();
+  assert.equal(harness.activeSubscriptionCount, 0);
+});
+
+test("rearming after replay cannot let an old provisioning lookup insert", async () => {
+  const harness = createHarness();
+  const staleSession = deferred();
+  const staleProfile = deferred();
+  const staleEnsureLookup = deferred();
+  const currentSession = deferred();
+  const currentProfile = deferred();
+  harness.sessions.push(staleSession, currentSession);
+  harness.profiles.push(staleProfile, staleEnsureLookup, currentProfile);
+
+  harness.render();
+  staleSession.resolve(session("account-stale"));
+  await staleSession.promise;
+  staleProfile.resolve({ data: null, error: null });
+  await staleProfile.promise;
+  await flush();
+
+  harness.replayEffects();
+  currentSession.resolve(session("account-current"));
+  await currentSession.promise;
+  currentProfile.resolve(profile("account-current"));
+  await currentProfile.promise;
+  staleEnsureLookup.resolve({ data: null, error: null });
+  await staleEnsureLookup.promise;
+  await flush();
+  harness.render();
+
+  assert.equal(harness.inserts.length, 0);
+  assert.equal(harness.value.dbUser.supabase_uid, "account-current");
+  assert.equal(harness.value.loading, false);
+});
 
 test("an older getSession result cannot replace a newer authenticated account", async () => {
   const harness = createHarness();

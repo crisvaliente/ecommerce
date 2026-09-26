@@ -36,17 +36,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [sessionUser, setSessionUser] = useState<User | null>(null);
   const [dbUser, setDbUser] = useState<CustomUser | null>(null);
 
-  // Anti-race en Strict Mode
-  const didInit = useRef(false);
-  const mountedRef = useRef(true);
+  // Each effect setup owns a distinct active lifetime.
+  const mountedRef = useRef(false);
   const loadVersionRef = useRef(0);
-
-  useEffect(
-    () => () => {
-      mountedRef.current = false;
-    },
-    []
-  );
+  const invalidateLoad = useCallback(() => {
+    ++loadVersionRef.current;
+  }, []);
 
   // ✅ safeSet estable
   const safeSet = useCallback(
@@ -163,9 +158,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   // ✅ Effect depende de load (función estable)
   useEffect(() => {
-    if (didInit.current) return;
-    didInit.current = true;
-
+    mountedRef.current = true;
     load();
 
     // Cambios de sesión
@@ -177,9 +170,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     );
 
     return () => {
+      invalidateLoad();
+      mountedRef.current = false;
       sub?.subscription.unsubscribe();
     };
-  }, [load, safeSet]);
+  }, [invalidateLoad, load, safeSet]);
 
   // ✅ signOut estable
   const signOut = useCallback(async () => {
