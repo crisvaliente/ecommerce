@@ -5,12 +5,11 @@ import { useAuth } from "../../context/AuthContext";
 import PanelSidebar from "./panel/Sidebar";
 import PanelNavbar from "./panel/Navbar";
 import { instanceConfig } from "../../config/instance";
+import { decidePanelAdmission } from "../../lib/panelRouteCapabilities";
 
 interface AdminLayoutProps {
   children: ReactNode;
 }
-
-const allowedRoles = ["admin", "staff"];
 
 type InterstitialProps = {
   title: string;
@@ -34,27 +33,18 @@ const PanelInterstitial: React.FC<InterstitialProps> = ({ title, message }) => {
 const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
   const { sessionUser, dbUser, loading } = useAuth();
   const router = useRouter();
+  const admission = decidePanelAdmission({
+    loading,
+    pathname: router.pathname,
+    sessionUser,
+    dbUser,
+  });
 
   useEffect(() => {
-    if (loading) return;
+    if (admission.kind === "redirect") router.replace(admission.destination);
+  }, [admission, router]);
 
-    if (!sessionUser) {
-      router.replace("/auth/login");
-      return;
-    }
-
-    if (!dbUser || !allowedRoles.includes(dbUser.rol)) {
-      router.replace("/auth/no-autorizado");
-      return;
-    }
-
-    if (!dbUser.empresa_id) {
-      router.replace("/auth/registroempresa");
-      return;
-    }
-  }, [sessionUser, dbUser, loading, router]);
-
-  if (loading) {
+  if (admission.kind === "loading") {
     return (
       <PanelInterstitial
         title="Cargando panel"
@@ -63,7 +53,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
     );
   }
 
-  if (!sessionUser || !dbUser?.empresa_id) {
+  if (admission.kind === "redirect") {
     return (
       <PanelInterstitial
         title="Redirigiendo"
