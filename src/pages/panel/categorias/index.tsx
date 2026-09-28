@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import AdminLayout from "../../../components/layout/AdminLayout";
 import { useAuth } from "../../../context/AuthContext";
 import { supabase } from "../../../lib/supabaseClient";
@@ -10,6 +10,10 @@ interface Categoria {
   descripcion: string | null;
   orden: number | null;
 }
+
+type CategoriasApiResponse = {
+  items: Categoria[];
+};
 
 const slugify = (text: string) =>
   text
@@ -32,34 +36,70 @@ const CategoriasPage: React.FC = () => {
   const [descripcion, setDescripcion] = useState("");
   const [orden, setOrden] = useState<number | undefined>(undefined);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const listingRequestId = useRef(0);
 
   const empresaId = dbUser?.empresa_id;
 
-  // Cargar categorías de la empresa
-  useEffect(() => {
-    if (!empresaId) return;
-    fetchCategorias();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [empresaId]);
+  const fetchCategorias = useCallback(async () => {
+    const requestId = ++listingRequestId.current;
+    const isCurrentRequest = () => listingRequestId.current === requestId;
 
-  const fetchCategorias = async () => {
     try {
       setLoadingCategorias(true);
-      const { data, error } = await supabase
-        .from("categoria")
-        .select("id, nombre, slug, descripcion, orden")
-        .eq("empresa_id", empresaId)
-        .order("orden", { ascending: true, nullsFirst: true });
 
-      if (error) throw error;
-      setCategorias(data || []);
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (sessionError) console.error("[categorias] getSession error:", sessionError);
+
+      const accessToken = session?.access_token;
+      if (!accessToken) {
+        if (isCurrentRequest()) {
+          setCategorias([]);
+          setErrorMsg("Sesión no válida. Volvé a iniciar sesión.");
+        }
+        return;
+      }
+
+      const response = await fetch("/api/panel/categorias", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        console.error("[categorias] endpoint error:", response.status, text);
+        if (isCurrentRequest()) {
+          setCategorias([]);
+          setErrorMsg("No se pudieron cargar las categorías.");
+        }
+        return;
+      }
+
+      const data = (await response.json()) as CategoriasApiResponse;
+      if (isCurrentRequest()) {
+        setCategorias(data.items ?? []);
+      }
     } catch (err) {
       console.error("Error cargando categorías", err);
-      setErrorMsg("No se pudieron cargar las categorías.");
+      if (isCurrentRequest()) {
+        setCategorias([]);
+        setErrorMsg("No se pudieron cargar las categorías.");
+      }
     } finally {
-      setLoadingCategorias(false);
+      if (isCurrentRequest()) setLoadingCategorias(false);
     }
-  };
+  }, []);
+
+  // dbUser.company remains a reload trigger; the API owns listing authorization.
+  useEffect(() => {
+    if (!empresaId) return;
+    void fetchCategorias();
+  }, [empresaId, fetchCategorias]);
 
   const resetForm = () => {
     setEditingId(null);
