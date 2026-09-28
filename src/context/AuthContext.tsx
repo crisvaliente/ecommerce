@@ -31,6 +31,14 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+function fetchOwnProfile(uid: string) {
+  return supabase
+    .from("usuario")
+    .select("id, supabase_uid, nombre, correo, rol, empresa_id")
+    .eq("supabase_uid", uid)
+    .maybeSingle();
+}
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
   const [sessionUser, setSessionUser] = useState<User | null>(null);
@@ -49,64 +57,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (mountedRef.current) setter(value);
     },
     [mountedRef]
-  );
-
-  /** ✅ ensureProfile estable (usada dentro de load) */
-  const ensureProfile = useCallback(
-    async (
-      u: User,
-      isCurrentLoad: () => boolean
-    ): Promise<CustomUser | null> => {
-      const emailLower = u.email ? u.email.toLowerCase() : null;
-
-      // Nombre desde metadata (Google u otros providers)
-      const fullName =
-        (u.user_metadata &&
-          (u.user_metadata.full_name ||
-            u.user_metadata.name ||
-            u.user_metadata.user_name)) ||
-        null;
-
-      // ¿existe?
-      const { data: existing, error: exErr } = await supabase
-        .from("usuario")
-        .select("id, supabase_uid, nombre, correo, rol, empresa_id")
-        .eq("supabase_uid", u.id)
-        .maybeSingle();
-
-      if (exErr) {
-        console.debug("[auth] ensureProfile select error:", exErr);
-        return null;
-      }
-      if (existing) return existing as CustomUser;
-      if (!isCurrentLoad()) return null;
-
-      // crear
-      const { data: inserted, error: insErr } = await supabase
-        .from("usuario")
-        .insert({
-          supabase_uid: u.id,
-          correo: emailLower,
-          nombre: fullName,
-          rol: "cliente",
-          onboarding: true,
-          empresa_id: null,
-        })
-        .select("id, supabase_uid, nombre, correo, rol, empresa_id")
-        .single();
-
-      if (insErr) {
-        console.debug("[auth] ensureProfile insert error:", insErr);
-        const { data: fallback } = await supabase
-          .from("usuario")
-          .select("id, supabase_uid, nombre, correo, rol, empresa_id")
-          .eq("supabase_uid", u.id)
-          .maybeSingle();
-        return (fallback as CustomUser) ?? null;
-      }
-      return inserted as CustomUser;
-    },
-    []
   );
 
   /** ✅ load estable (usada en effect y expuesta como refresh) */
@@ -135,26 +85,28 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
-    // 3) Buscar perfil por supabase_uid
-    const { data, error } = await supabase
-      .from("usuario")
-      .select("id, supabase_uid, nombre, correo, rol, empresa_id")
-      .eq("supabase_uid", u.id)
-      .maybeSingle();
+    // 3) Buscar perfil por supabase_uid. Lo crea el trigger on_auth_user_created
+    // (migración 20260914165851); el navegador no provisiona ni repara perfiles.
+    let { data, error } = await fetchOwnProfile(u.id);
     if (!isCurrentLoad()) return;
 
-    if (error) console.debug("[auth] fetch usuario error:", error);
+    // 4) Un error de lectura (no un perfil inexistente) se reintenta una sola vez.
+    if (error) {
+      console.error("[auth] fetch usuario error:", error);
+      ({ data, error } = await fetchOwnProfile(u.id));
+      if (!isCurrentLoad()) return;
+      if (error) console.error("[auth] fetch usuario retry error:", error);
+    }
+    if (!error && !data) {
+      console.warn("[auth] usuario sin perfil para la sesión actual");
+    }
 
-    let profile: CustomUser | null = (data as CustomUser) ?? null;
-
-    // 4) Autocrear si falta
-    if (!profile) profile = await ensureProfile(u, isCurrentLoad);
-    if (!isCurrentLoad()) return;
+    const profile: CustomUser | null = error ? null : (data as CustomUser) ?? null;
 
     // 5) Setear estado
     safeSet(setDbUser, profile);
     safeSet(setLoading, false);
-  }, [ensureProfile, safeSet]);
+  }, [safeSet]);
 
   // ✅ Effect depende de load (función estable)
   useEffect(() => {

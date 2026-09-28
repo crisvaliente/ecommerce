@@ -177,21 +177,18 @@ test("effect replay keeps one subscription and finishes its replacement load", a
   assert.equal(harness.activeSubscriptionCount, 0);
 });
 
-test("rearming after replay cannot let an old provisioning lookup insert", async () => {
+test("a stale missing-profile result after replay cannot clear the current account", async () => {
   const harness = createHarness();
   const staleSession = deferred();
   const staleProfile = deferred();
-  const staleEnsureLookup = deferred();
   const currentSession = deferred();
   const currentProfile = deferred();
   harness.sessions.push(staleSession, currentSession);
-  harness.profiles.push(staleProfile, staleEnsureLookup, currentProfile);
+  harness.profiles.push(staleProfile, currentProfile);
 
   harness.render();
   staleSession.resolve(session("account-stale"));
   await staleSession.promise;
-  staleProfile.resolve({ data: null, error: null });
-  await staleProfile.promise;
   await flush();
 
   harness.replayEffects();
@@ -199,8 +196,8 @@ test("rearming after replay cannot let an old provisioning lookup insert", async
   await currentSession.promise;
   currentProfile.resolve(profile("account-current"));
   await currentProfile.promise;
-  staleEnsureLookup.resolve({ data: null, error: null });
-  await staleEnsureLookup.promise;
+  staleProfile.resolve({ data: null, error: null });
+  await staleProfile.promise;
   await flush();
   harness.render();
 
@@ -301,99 +298,140 @@ test("logout invalidates pending work and cannot clear a newer account", async (
   assert.equal(harness.value.loading, false);
 });
 
-test("an invalidated ensureProfile lookup does not start an insert", async () => {
-  const harness = createHarness();
-  const currentSession = deferred();
-  const initialProfileLookup = deferred();
-  const ensureProfileLookup = deferred();
-  const insertResult = deferred();
-  harness.sessions.push(currentSession);
-  harness.profiles.push(initialProfileLookup, ensureProfileLookup, insertResult);
+const lookupError = { data: null, error: { message: "lookup failed" } };
 
-  harness.render();
-  currentSession.resolve(session("account-a"));
-  await currentSession.promise;
-  initialProfileLookup.resolve({ data: null, error: null });
-  await initialProfileLookup.promise;
-  await flush();
-  await harness.value.signOut();
-  ensureProfileLookup.resolve({ data: null, error: null });
-  await ensureProfileLookup.promise;
-  await flush();
+async function withConsole(method, run) {
+  const original = console[method];
+  const calls = [];
+  console[method] = (...args) => { calls.push(args); };
+  try {
+    await run(calls);
+  } finally {
+    console[method] = original;
+  }
+}
 
-  assert.equal(harness.inserts.length, 0);
-});
+const withConsoleErrors = (run) => withConsole("error", run);
 
-test("a superseded ensureProfile lookup does not start an insert", async () => {
-  const harness = createHarness();
-  const currentSession = deferred();
-  const initialProfileLookup = deferred();
-  const ensureProfileLookup = deferred();
-  const newerSession = deferred();
-  const insertResult = deferred();
-  harness.sessions.push(currentSession, newerSession);
-  harness.profiles.push(initialProfileLookup, ensureProfileLookup, insertResult);
-
-  harness.render();
-  currentSession.resolve(session("account-a"));
-  await currentSession.promise;
-  initialProfileLookup.resolve({ data: null, error: null });
-  await initialProfileLookup.promise;
-  await flush();
-  harness.authEvent({ user: user("account-b") });
-  ensureProfileLookup.resolve({ data: null, error: null });
-  await ensureProfileLookup.promise;
-  await flush();
-
-  assert.equal(harness.inserts.length, 0);
-});
-
-test("an unmounted ensureProfile lookup does not start an insert", async () => {
-  const harness = createHarness();
-  const currentSession = deferred();
-  const initialProfileLookup = deferred();
-  const ensureProfileLookup = deferred();
-  const insertResult = deferred();
-  harness.sessions.push(currentSession);
-  harness.profiles.push(initialProfileLookup, ensureProfileLookup, insertResult);
-
-  harness.render();
-  currentSession.resolve(session("account-a"));
-  await currentSession.promise;
-  initialProfileLookup.resolve({ data: null, error: null });
-  await initialProfileLookup.promise;
-  await flush();
-  harness.unmount();
-  ensureProfileLookup.resolve({ data: null, error: null });
-  await ensureProfileLookup.promise;
-  await flush();
-
-  assert.equal(harness.inserts.length, 0);
-});
-
-test("missing profiles preserve provisioning fields and returned errors fall back", async () => {
+async function loadSingleAccount(lookups) {
   const harness = createHarness();
   harness.sessions.push(settled(session("account-c")));
-  harness.profiles.push(
-    settled({ data: null, error: { message: "lookup failed" } }),
-    settled({ data: null, error: null }),
-    settled(profile("account-c")),
-  );
-
+  harness.profiles.push(...lookups.map(settled));
   harness.render();
   await flush();
   harness.render();
-  assert.equal(harness.value.dbUser.supabase_uid, "account-c");
-  assert.equal(harness.value.loading, false);
-  assert.deepEqual(harness.queriedUids, ["account-c", "account-c"]);
-  assert.deepEqual(harness.inserts, [{
-    supabase_uid: "account-c",
-    correo: "account-c@example.com",
-    nombre: null,
-    rol: "cliente",
-    onboarding: true,
-    empresa_id: null,
-  }]);
+  return harness;
+}
+
+// The auth trigger owns provisioning; the browser only reads its own profile.
+test("a missing profile is looked up once, never retried, never written from the browser, and warned", async () => {
+  await withConsole("warn", async (warnings) => {
+    // Extra queued lookups let a retrying/provisioning implementation proceed and fail on assertions.
+    const harness = await loadSingleAccount([{ data: null, error: null }, { data: null, error: null }, profile("account-c")]);
+    assert.deepEqual(harness.inserts, []);
+    assert.deepEqual(harness.queriedUids, ["account-c"]);
+    assert.equal(harness.value.sessionUser.id, "account-c");
+    assert.equal(harness.value.dbUser, null);
+    assert.equal(harness.value.loading, false);
+    assert.equal(warnings.length, 1);
+  });
+});
+
+test("a transient lookup error is retried once and publishes the recovered profile", async () => {
+  await withConsoleErrors(async (errors) => {
+    const harness = await loadSingleAccount([lookupError, profile("account-c")]);
+    assert.deepEqual(harness.inserts, []);
+    assert.deepEqual(harness.queriedUids, ["account-c", "account-c"]);
+    assert.equal(harness.value.dbUser.supabase_uid, "account-c");
+    assert.equal(harness.value.loading, false);
+    assert.equal(errors.length, 1);
+  });
+});
+
+test("a repeated lookup error stops after one retry and publishes no profile", async () => {
+  await withConsoleErrors(async (errors) => {
+    const harness = await loadSingleAccount([lookupError, lookupError, profile("account-c")]);
+    assert.deepEqual(harness.inserts, []);
+    assert.deepEqual(harness.queriedUids, ["account-c", "account-c"]);
+    assert.equal(harness.value.sessionUser.id, "account-c");
+    assert.equal(harness.value.dbUser, null);
+    assert.equal(harness.value.loading, false);
+    assert.equal(errors.length, 2);
+  });
+});
+
+test("a retry superseded by a newer account cannot publish its profile", async () => {
+  await withConsoleErrors(async () => {
+    const harness = createHarness();
+    const firstSession = deferred();
+    const retryLookup = deferred();
+    const secondSession = deferred();
+    const secondProfile = deferred();
+    harness.sessions.push(firstSession, secondSession);
+    harness.profiles.push(settled(lookupError), retryLookup, secondProfile);
+
+    harness.render();
+    firstSession.resolve(session("account-a"));
+    await firstSession.promise;
+    await flush();
+    assert.deepEqual(harness.queriedUids, ["account-a", "account-a"]);
+
+    harness.authEvent({ user: user("account-b") });
+    secondSession.resolve(session("account-b"));
+    await secondSession.promise;
+    secondProfile.resolve(profile("account-b"));
+    await secondProfile.promise;
+    retryLookup.resolve(profile("account-a"));
+    await retryLookup.promise;
+    await flush();
+    harness.render();
+
+    assert.equal(harness.value.sessionUser.id, "account-b");
+    assert.equal(harness.value.dbUser.supabase_uid, "account-b");
+    assert.equal(harness.value.loading, false);
+  });
+});
+
+async function startPendingRetry(harness) {
+  const retryLookup = deferred();
+  harness.sessions.push(settled(session("account-a")));
+  harness.profiles.push(settled(lookupError), retryLookup);
+  harness.render();
+  await flush();
+  assert.deepEqual(harness.queriedUids, ["account-a", "account-a"]);
+  return retryLookup;
+}
+
+test("a retry pending during logout cannot publish its profile", async () => {
+  await withConsoleErrors(async () => {
+    const harness = createHarness();
+    const retryLookup = await startPendingRetry(harness);
+
+    await harness.value.signOut();
+    retryLookup.resolve(profile("account-a"));
+    await retryLookup.promise;
+    await flush();
+    harness.render();
+
+    assert.equal(harness.value.sessionUser, null);
+    assert.equal(harness.value.dbUser, null);
+    assert.equal(harness.value.loading, false);
+  });
+});
+
+test("a retry pending during unmount cannot publish its profile", async () => {
+  await withConsoleErrors(async () => {
+    const harness = createHarness();
+    const retryLookup = await startPendingRetry(harness);
+
+    harness.unmount();
+    retryLookup.resolve(profile("account-a"));
+    await retryLookup.promise;
+    await flush();
+
+    assert.equal(harness.state.dbUser, null);
+    assert.equal(harness.state.loading, true);
+  });
 });
 
 test("anonymous sessions and returned getSession errors clear both users", async () => {
