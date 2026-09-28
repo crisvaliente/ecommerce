@@ -6,7 +6,7 @@ User accepted the recommended next slice ("dale"): `load()` had no try/catch, so
 
 ## Contract
 
-- A thrown `getSession` is handled like a returned session error: `console.debug`, no session, `profileStatus: "anonymous"` (same as the existing "returned getSession errors clear both users" behavior).
+- A thrown `getSession` is handled like a returned session error: `console.warn`, no session, `profileStatus: "anonymous"` (same as the existing "returned getSession errors clear both users" behavior).
 - A thrown profile lookup is handled like a returned lookup error: `console.error`, one retry after the backoff, then `ready` or `error`.
 - `load()` / `refresh()` never reject. Load-version, logout and unmount guards are unchanged.
 
@@ -16,6 +16,9 @@ User accepted the recommended next slice ("dale"): `load()` had no try/catch, so
 - [x] LE-2 — GREEN: `readSessionUser()` and `fetchOwnProfile()` wrap their Supabase calls in try/catch and return `{ …, error }`; `load()` consumes them unchanged in shape. The `data as CustomUser` cast moved into `fetchOwnProfile`.
 - [x] LE-3 — Harness timing: the async wrappers add one microtask hop, so two race tests ("an old profile completion leaves the current load pending", "logout invalidates pending work…") no longer reached the profile stage before their auth event/logout, and the queued lookups were consumed by the wrong load. Added `flush()` plus explicit `queriedUids` assertions to pin the intended ordering instead of counting microtasks. The adjusted tests pass against both HEAD `AuthContext.tsx` (only the 3 new tests fail) and the candidate; the file was restored byte-identical after the HEAD run.
 - [x] LE-4 — Checks: focused 24/24, combined panel suite 190/190, `pnpm exec tsc --noEmit --incremental false`, scoped ESLint and `git diff --check` exit 0. Diff +90/−12 = 102 lines, 2 files.
+- [x] LE-5 — Native review `review-4f9777cc73847f36` (high, 4 lenses, 102 lines, budget 51). risk: 0 findings. readability: 0 findings. resilience: SUGGESTION R4-thrown-session-debug-only (a thrown getSession, previously an unhandled rejection that monitoring would see, was now logged only through `console.debug`, which browsers hide by default). `review-reliability` refused again (7th time overall); no verdict.
+- [x] LE-6 — User chose to apply the suggestion. RED: the thrown and the returned getSession-error tests now require one `console.warn` and both failed. GREEN: `console.debug` → `console.warn` for getSession errors. Checks: focused 24/24, combined 190/190, tsc/ESLint/diff-check exit 0. The review lineage is stale for this candidate.
+- [x] LE-7 — Commit `6b13301` `fix(auth): handle thrown Supabase calls while loading the session` with only the 2 files (+103/−21).
 
 ## Limits
 
