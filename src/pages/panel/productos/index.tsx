@@ -35,6 +35,13 @@ type ProductoPanelDTO = {
   stock_source: "view" | "legacy";
 };
 
+const DELETE_ERROR_MESSAGES: Record<string, string> = {
+  producto_en_pedido_activo:
+    "No se puede eliminar: el producto está en un pedido pendiente de pago.",
+  producto_en_uso: "No se puede eliminar: el producto todavía está en uso.",
+  producto_no_encontrado: "El producto ya no existe. Refrescá el listado.",
+};
+
 type ApiOk = {
   items: ProductoPanelDTO[];
   meta: {
@@ -147,7 +154,6 @@ const ProductosPage: React.FC = () => {
     };
   }, [productos]);
 
-  // Mutación permitida por ancla (deuda consciente TD-001)
   const handleDelete = async (id: string) => {
     const producto = productos.find((item) => item.id === id);
     const ok = window.confirm(
@@ -155,30 +161,43 @@ const ProductosPage: React.FC = () => {
     );
     if (!ok) return;
 
-    if (!dbUser?.empresa_id) {
-      setErrorMsg("No se encontró empresa asociada al usuario.");
-      return;
-    }
-
     setDeletingId(id);
     setErrorMsg(null);
 
-    const { error } = await supabase
-      .from("producto")
-      .delete()
-      .eq("id", id)
-      .eq("empresa_id", dbUser.empresa_id);
+    try {
+      const {
+        data: { session },
+        error: sessErr,
+      } = await supabase.auth.getSession();
+      if (sessErr) console.error("[productos] getSession error:", sessErr);
 
-    if (error) {
-      console.error("[productos] delete error:", error);
+      const accessToken = session?.access_token;
+      if (!accessToken) {
+        setErrorMsg("Sesión no válida. Volvé a iniciar sesión.");
+        return;
+      }
+
+      const r = await fetch(`/api/panel/productos?id=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+
+      if (!r.ok) {
+        const payload = (await r.json().catch(() => null)) as { error?: unknown } | null;
+        const code = typeof payload?.error === "string" ? payload.error : "unknown_error";
+        console.error("[productos] delete error:", r.status, code);
+        setErrorMsg(DELETE_ERROR_MESSAGES[code] ?? "No se pudo eliminar el producto.");
+        return;
+      }
+
+      setProductos((prev) => prev.filter((p) => p.id !== id));
+      setUiMessage(`Producto eliminado: ${producto?.nombre ?? "sin nombre"}.`);
+    } catch (err) {
+      console.error("[productos] delete error:", err);
       setErrorMsg("No se pudo eliminar el producto.");
+    } finally {
       setDeletingId(null);
-      return;
     }
-
-    setProductos((prev) => prev.filter((p) => p.id !== id));
-    setUiMessage(`Producto eliminado: ${producto?.nombre ?? "sin nombre"}.`);
-    setDeletingId(null);
   };
 
   const renderEstadoBadge = (estado: ProductoEstado) => {

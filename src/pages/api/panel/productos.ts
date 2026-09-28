@@ -1,5 +1,11 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { applyRateLimitHeaders, checkRateLimit } from "../../../lib/apiSecurity";
+import {
+  applyRateLimitHeaders,
+  checkRateLimit,
+  hasBearerAuthorization,
+  hasSessionAccessCookie,
+  validateTrustedOrigin,
+} from "../../../lib/apiSecurity";
 import {
   authorizePanelRequest,
   createPanelServiceClient,
@@ -45,16 +51,28 @@ type ApiOk = {
 };
 
 type ApiErr = { error: string };
+type ApiResponse = NextApiResponse<ApiOk | ApiErr>;
 
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse<ApiOk | ApiErr>
-) {
-  if (req.method !== "GET") {
-    res.setHeader("Allow", "GET");
-    return res.status(405).json({ error: "Method not allowed" });
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function safeErrorCode(error: unknown): string {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === "string") return code.slice(0, 80);
   }
 
+  return error instanceof Error ? error.name.slice(0, 80) : "unknown_error";
+}
+
+function logDeleteFailure(operation: string, error: unknown): void {
+  console.error({
+    scope: "panel.productos.delete",
+    operation,
+    errorCode: safeErrorCode(error),
+  });
+}
+
+async function listProductos(req: NextApiRequest, res: ApiResponse) {
   const rateLimit = checkRateLimit(req, {
     key: "api:panel:productos:list",
     limit: 60,
@@ -140,4 +158,102 @@ export default async function handler(
   } catch {
     return res.status(500).json({ error: "internal_error" });
   }
+}
+
+/**
+ * A pending, unexpired order can still be paid; its consolidation fails once
+ * pedido_item.producto_id is nulled by the delete, so such products are kept.
+ * The check and the delete are separate statements: an order created between
+ * them is not detected.
+ */
+async function deleteProducto(req: NextApiRequest, res: ApiResponse) {
+  const rateLimit = checkRateLimit(req, {
+    key: "api:panel:productos:write",
+    limit: 30,
+    windowMs: 60_000,
+  });
+  applyRateLimitHeaders(res, rateLimit);
+
+  if (!rateLimit.ok) {
+    return res.status(429).json({ error: "rate_limit_exceeded" });
+  }
+
+  if (Object.prototype.hasOwnProperty.call(req.query, "empresa_id")) {
+    return res.status(400).json({ error: "legacy_tenant_input" });
+  }
+
+  const rawId = req.query.id;
+  const productoId = Array.isArray(rawId) ? rawId[0] : rawId;
+  if (typeof productoId !== "string" || !UUID_RE.test(productoId)) {
+    return res.status(400).json({ error: "invalid_request" });
+  }
+
+  const originValidation = validateTrustedOrigin(req, {
+    allowWithoutOrigin: hasBearerAuthorization(req) || !hasSessionAccessCookie(req),
+  });
+  if (originValidation.ok === false) {
+    return res.status(403).json({ error: originValidation.reason });
+  }
+
+  const authorization = await authorizePanelRequest(req, "catalog.operate");
+  if (authorization.ok === false) {
+    return res.status(authorization.status).json({ error: authorization.error });
+  }
+
+  const empresaId = authorization.principal.empresaId;
+  res.setHeader("Cache-Control", "no-store");
+
+  try {
+    const serviceClient = createPanelServiceClient();
+    const { data: activeItems, error: activeError } = await serviceClient
+      .from("pedido_item")
+      .select("pedido_id, pedido!inner(estado, expira_en)")
+      .eq("empresa_id", empresaId)
+      .eq("producto_id", productoId)
+      .eq("pedido.estado", "pendiente_pago")
+      .gt("pedido.expira_en", new Date().toISOString())
+      .limit(1);
+
+    if (activeError) {
+      logDeleteFailure("active_order_check", activeError);
+      return res.status(500).json({ error: "internal_error" });
+    }
+
+    if ((activeItems ?? []).length > 0) {
+      return res.status(409).json({ error: "producto_en_pedido_activo" });
+    }
+
+    const { data, error } = await serviceClient
+      .from("producto")
+      .delete()
+      .eq("id", productoId)
+      .eq("empresa_id", empresaId)
+      .select("id")
+      .maybeSingle();
+
+    if (error) {
+      if (safeErrorCode(error) === "23503") {
+        return res.status(409).json({ error: "producto_en_uso" });
+      }
+      logDeleteFailure("delete", error);
+      return res.status(500).json({ error: "internal_error" });
+    }
+
+    if (!data) {
+      return res.status(404).json({ error: "producto_no_encontrado" });
+    }
+
+    return res.status(204).end();
+  } catch (error) {
+    logDeleteFailure("unexpected", error);
+    return res.status(500).json({ error: "internal_error" });
+  }
+}
+
+export default async function handler(req: NextApiRequest, res: ApiResponse) {
+  if (req.method === "GET") return listProductos(req, res);
+  if (req.method === "DELETE") return deleteProducto(req, res);
+
+  res.setHeader("Allow", "GET, DELETE");
+  return res.status(405).json({ error: "Method not allowed" });
 }

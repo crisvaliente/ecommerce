@@ -9,8 +9,10 @@ const ts = require("typescript");
 
 const PRODUCTOS_FILE = new URL("../src/pages/api/panel/productos.ts", import.meta.url);
 
-function request({ method = "GET", query = {} } = {}) {
-  return { method, query, headers: {}, socket: { remoteAddress: "127.0.0.1" } };
+const PRODUCTO_ID = "5f2b7c1e-8d4a-4c3b-9e6f-1a2b3c4d5e6f";
+
+function request({ method = "GET", query = {}, headers = {} } = {}) {
+  return { method, query, headers, socket: { remoteAddress: "127.0.0.1" } };
 }
 
 function response() {
@@ -21,6 +23,7 @@ function response() {
     setHeader(name, value) { this.headers[name] = value; },
     status(code) { this.statusCode = code; return this; },
     json(payload) { this.payload = payload; return this; },
+    end() { this.ended = true; return this; },
   };
 }
 
@@ -54,9 +57,13 @@ function fixture({
   resumen = [{ producto_id: "producto-a", stock_total: 8, usa_variantes: true }],
   productosError = null,
   resumenError = null,
+  activeOrders = { data: [], error: null },
+  deleteResult = { data: { id: PRODUCTO_ID }, error: null },
+  origin = { ok: true, origin: null },
   serviceThrows = false,
 } = {}) {
   const authorizationCalls = [];
+  const originCalls = [];
   const serviceCalls = [];
   let serviceConstructions = 0;
   const service = {
@@ -64,8 +71,12 @@ function fixture({
       serviceCalls.push({ step: "from", table });
       return {
         select(columns) { serviceCalls.push({ step: "select", table, columns }); return this; },
+        delete() { serviceCalls.push({ step: "delete", table }); return this; },
         eq(column, value) { serviceCalls.push({ step: "eq", table, column, value }); return this; },
+        gt(column, value) { serviceCalls.push({ step: "gt", table, column, value }); return this; },
         order(column, options) { serviceCalls.push({ step: "order", table, column, options }); return this; },
+        async limit(count) { serviceCalls.push({ step: "limit", table, count }); return activeOrders; },
+        async maybeSingle() { serviceCalls.push({ step: "maybeSingle", table }); return deleteResult; },
         async returns() {
           return table === "producto"
             ? { data: productos, error: productosError }
@@ -76,12 +87,19 @@ function fixture({
   };
   return {
     authorizationCalls,
+    originCalls,
     serviceCalls,
     get serviceConstructions() { return serviceConstructions; },
     dependencies: {
       security: {
         checkRateLimit() { return rateLimit; },
         applyRateLimitHeaders(res, result) { res.setHeader("X-RateLimit-Limit", String(result.limit)); },
+        hasBearerAuthorization(req) { return typeof req.headers.authorization === "string"; },
+        hasSessionAccessCookie(req) { return typeof req.headers.cookie === "string"; },
+        validateTrustedOrigin(req, options) {
+          originCalls.push(options);
+          return origin;
+        },
       },
       authorization: {
         authorizePanelRequest: async (...args) => {
@@ -140,6 +158,7 @@ test("rejects every present legacy tenant query value before authorization or se
 test("retains method and rate-limit precedence over legacy input", async () => {
   const method = await invoke({ method: "POST", query: { empresa_id: "empresa-a" } });
   assert.equal(method.res.statusCode, 405);
+  assert.equal(method.res.headers.Allow, "GET, DELETE");
   assert.deepEqual(method.res.payload, { error: "Method not allowed" });
   assert.equal(method.authorizationCalls.length, 0);
 
@@ -201,4 +220,117 @@ test("consumer statically uses the tenant-free endpoint while retaining bearer a
   assert.match(source, /Authorization:\s*`Bearer \$\{accessToken\}`/);
   assert.match(source, /\(data\.items \?\? \[\]\)\.map/);
   assert.doesNotMatch(source, /api\/panel\/productos\?empresa_id/);
+});
+
+test("consumer deletes through the canonical endpoint and never writes producto directly", async () => {
+  const source = await readFile(new URL("../src/pages/panel/productos/index.tsx", import.meta.url), "utf8");
+  assert.match(source, /`\/api\/panel\/productos\?id=\$\{encodeURIComponent\(id\)\}`/);
+  assert.match(source, /method:\s*"DELETE"/);
+  assert.doesNotMatch(source, /supabase\s*\.from\(/);
+  assert.match(source, /producto_en_pedido_activo/);
+});
+
+test("deletes only a product of the canonical tenant without active orders", async (t) => {
+  for (const empresaId of ["empresa-a", "empresa-b"]) {
+    await t.test(empresaId, async () => {
+      const { res, authorizationCalls, serviceCalls } = await invoke(
+        { method: "DELETE", query: { id: PRODUCTO_ID } },
+        { authorization: async () => ({ ok: true, principal: { empresaId } }) },
+      );
+      assert.equal(res.statusCode, 204);
+      assert.equal(res.ended, true);
+      assert.deepEqual(authorizationCalls.map((call) => call.slice(1)), [["catalog.operate"]]);
+      const [guardExpiry] = serviceCalls.filter((call) => call.step === "gt");
+      assert.equal(typeof guardExpiry.value, "string");
+      assert.deepEqual(serviceCalls, [
+        { step: "from", table: "pedido_item" },
+        { step: "select", table: "pedido_item", columns: "pedido_id, pedido!inner(estado, expira_en)" },
+        { step: "eq", table: "pedido_item", column: "empresa_id", value: empresaId },
+        { step: "eq", table: "pedido_item", column: "producto_id", value: PRODUCTO_ID },
+        { step: "eq", table: "pedido_item", column: "pedido.estado", value: "pendiente_pago" },
+        { step: "gt", table: "pedido_item", column: "pedido.expira_en", value: guardExpiry.value },
+        { step: "limit", table: "pedido_item", count: 1 },
+        { step: "from", table: "producto" },
+        { step: "delete", table: "producto" },
+        { step: "eq", table: "producto", column: "id", value: PRODUCTO_ID },
+        { step: "eq", table: "producto", column: "empresa_id", value: empresaId },
+        { step: "select", table: "producto", columns: "id" },
+        { step: "maybeSingle", table: "producto" },
+      ]);
+    });
+  }
+});
+
+test("refuses to delete a product in a pending, unexpired order", async () => {
+  const { res, serviceCalls } = await invoke(
+    { method: "DELETE", query: { id: PRODUCTO_ID } },
+    { activeOrders: { data: [{ pedido_id: "pedido-1" }], error: null } },
+  );
+  assert.equal(res.statusCode, 409);
+  assert.deepEqual(res.payload, { error: "producto_en_pedido_activo" });
+  assert.equal(serviceCalls.some((call) => call.step === "delete"), false);
+});
+
+test("a failed active-order check never deletes", async () => {
+  const { res, serviceCalls } = await invoke(
+    { method: "DELETE", query: { id: PRODUCTO_ID } },
+    { activeOrders: { data: null, error: { code: "XX000" } } },
+  );
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.payload, { error: "internal_error" });
+  assert.equal(serviceCalls.some((call) => call.step === "delete"), false);
+});
+
+test("maps delete outcomes", async (t) => {
+  const cases = [
+    ["outside tenant", { data: null, error: null }, 404, "producto_no_encontrado"],
+    ["restricted reference", { data: null, error: { code: "23503" } }, 409, "producto_en_uso"],
+    ["other failure", { data: null, error: { code: "XX000" } }, 500, "internal_error"],
+  ];
+  for (const [name, deleteResult, status, error] of cases) {
+    await t.test(name, async () => {
+      const { res } = await invoke({ method: "DELETE", query: { id: PRODUCTO_ID } }, { deleteResult });
+      assert.equal(res.statusCode, status);
+      assert.deepEqual(res.payload, { error });
+    });
+  }
+});
+
+test("rejects invalid deletes before authorization", async (t) => {
+  const cases = [
+    ["legacy tenant", { method: "DELETE", query: { id: PRODUCTO_ID, empresa_id: "empresa-b" } }, 400, "legacy_tenant_input"],
+    ["missing id", { method: "DELETE" }, 400, "invalid_request"],
+    ["invalid id", { method: "DELETE", query: { id: "producto-a" } }, 400, "invalid_request"],
+  ];
+  for (const [name, requestOptions, status, error] of cases) {
+    await t.test(name, async () => {
+      const result = await invoke(requestOptions);
+      assert.equal(result.res.statusCode, status);
+      assert.deepEqual(result.res.payload, { error });
+      assert.equal(result.authorizationCalls.length, 0);
+      assert.equal(result.serviceConstructions, 0);
+    });
+  }
+
+  const limited = await invoke({ method: "DELETE", query: { id: PRODUCTO_ID } }, { rateLimit: { ok: false, limit: 30 } });
+  assert.equal(limited.res.statusCode, 429);
+  assert.equal(limited.authorizationCalls.length, 0);
+});
+
+test("deletes require a trusted origin for cookie sessions and authorization before the service", async () => {
+  const cookie = await invoke(
+    { method: "DELETE", query: { id: PRODUCTO_ID }, headers: { cookie: "sb-access-token=a" } },
+    { origin: { ok: false, reason: "untrusted_origin", origin: "https://evil.example" } },
+  );
+  assert.deepEqual(cookie.originCalls, [{ allowWithoutOrigin: false }]);
+  assert.equal(cookie.res.statusCode, 403);
+  assert.equal(cookie.authorizationCalls.length, 0);
+
+  const denied = await invoke(
+    { method: "DELETE", query: { id: PRODUCTO_ID }, headers: { authorization: "Bearer a" } },
+    { authorization: async () => ({ ok: false, status: 403, error: "forbidden" }) },
+  );
+  assert.deepEqual(denied.originCalls, [{ allowWithoutOrigin: true }]);
+  assert.equal(denied.res.statusCode, 403);
+  assert.equal(denied.serviceConstructions, 0);
 });
