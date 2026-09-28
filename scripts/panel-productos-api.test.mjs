@@ -57,7 +57,6 @@ function fixture({
   resumen = [{ producto_id: "producto-a", stock_total: 8, usa_variantes: true }],
   productosError = null,
   resumenError = null,
-  activeOrders = { data: [], error: null },
   deleteResult = { data: { id: PRODUCTO_ID }, error: null },
   origin = { ok: true, origin: null },
   serviceThrows = false,
@@ -73,9 +72,7 @@ function fixture({
         select(columns) { serviceCalls.push({ step: "select", table, columns }); return this; },
         delete() { serviceCalls.push({ step: "delete", table }); return this; },
         eq(column, value) { serviceCalls.push({ step: "eq", table, column, value }); return this; },
-        gt(column, value) { serviceCalls.push({ step: "gt", table, column, value }); return this; },
         order(column, options) { serviceCalls.push({ step: "order", table, column, options }); return this; },
-        async limit(count) { serviceCalls.push({ step: "limit", table, count }); return activeOrders; },
         async maybeSingle() { serviceCalls.push({ step: "maybeSingle", table }); return deleteResult; },
         async returns() {
           return table === "producto"
@@ -230,7 +227,7 @@ test("consumer deletes through the canonical endpoint and never writes producto 
   assert.match(source, /producto_en_pedido_activo/);
 });
 
-test("deletes only a product of the canonical tenant without active orders", async (t) => {
+test("deletes only a product of the canonical tenant", async (t) => {
   for (const empresaId of ["empresa-a", "empresa-b"]) {
     await t.test(empresaId, async () => {
       const { res, authorizationCalls, serviceCalls } = await invoke(
@@ -240,16 +237,7 @@ test("deletes only a product of the canonical tenant without active orders", asy
       assert.equal(res.statusCode, 204);
       assert.equal(res.ended, true);
       assert.deepEqual(authorizationCalls.map((call) => call.slice(1)), [["catalog.operate"]]);
-      const [guardExpiry] = serviceCalls.filter((call) => call.step === "gt");
-      assert.equal(typeof guardExpiry.value, "string");
       assert.deepEqual(serviceCalls, [
-        { step: "from", table: "pedido_item" },
-        { step: "select", table: "pedido_item", columns: "pedido_id, pedido!inner(estado, expira_en)" },
-        { step: "eq", table: "pedido_item", column: "empresa_id", value: empresaId },
-        { step: "eq", table: "pedido_item", column: "producto_id", value: PRODUCTO_ID },
-        { step: "eq", table: "pedido_item", column: "pedido.estado", value: "pendiente_pago" },
-        { step: "gt", table: "pedido_item", column: "pedido.expira_en", value: guardExpiry.value },
-        { step: "limit", table: "pedido_item", count: 1 },
         { step: "from", table: "producto" },
         { step: "delete", table: "producto" },
         { step: "eq", table: "producto", column: "id", value: PRODUCTO_ID },
@@ -261,29 +249,10 @@ test("deletes only a product of the canonical tenant without active orders", asy
   }
 });
 
-test("refuses to delete a product in a pending, unexpired order", async () => {
-  const { res, serviceCalls } = await invoke(
-    { method: "DELETE", query: { id: PRODUCTO_ID } },
-    { activeOrders: { data: [{ pedido_id: "pedido-1" }], error: null } },
-  );
-  assert.equal(res.statusCode, 409);
-  assert.deepEqual(res.payload, { error: "producto_en_pedido_activo" });
-  assert.equal(serviceCalls.some((call) => call.step === "delete"), false);
-});
-
-test("a failed active-order check never deletes", async () => {
-  const { res, serviceCalls } = await invoke(
-    { method: "DELETE", query: { id: PRODUCTO_ID } },
-    { activeOrders: { data: null, error: { code: "XX000" } } },
-  );
-  assert.equal(res.statusCode, 500);
-  assert.deepEqual(res.payload, { error: "internal_error" });
-  assert.equal(serviceCalls.some((call) => call.step === "delete"), false);
-});
-
 test("maps delete outcomes", async (t) => {
   const cases = [
     ["outside tenant", { data: null, error: null }, 404, "producto_no_encontrado"],
+    ["pending order guard", { data: null, error: { code: "55006" } }, 409, "producto_en_pedido_activo"],
     ["restricted reference", { data: null, error: { code: "23503" } }, 409, "producto_en_uso"],
     ["other failure", { data: null, error: { code: "XX000" } }, 500, "internal_error"],
   ];

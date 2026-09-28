@@ -161,10 +161,9 @@ async function listProductos(req: NextApiRequest, res: ApiResponse) {
 }
 
 /**
- * A pending, unexpired order can still be paid; its consolidation fails once
- * pedido_item.producto_id is nulled by the delete, so such products are kept.
- * The check and the delete are separate statements: an order created between
- * them is not detected.
+ * The database rejects deleting a product in a pending, unexpired order
+ * (trigger reject_delete_in_pending_order, SQLSTATE 55006) because its payment
+ * consolidation would fail once pedido_item.producto_id is nulled.
  */
 async function deleteProducto(req: NextApiRequest, res: ApiResponse) {
   const rateLimit = checkRateLimit(req, {
@@ -204,26 +203,7 @@ async function deleteProducto(req: NextApiRequest, res: ApiResponse) {
   res.setHeader("Cache-Control", "no-store");
 
   try {
-    const serviceClient = createPanelServiceClient();
-    const { data: activeItems, error: activeError } = await serviceClient
-      .from("pedido_item")
-      .select("pedido_id, pedido!inner(estado, expira_en)")
-      .eq("empresa_id", empresaId)
-      .eq("producto_id", productoId)
-      .eq("pedido.estado", "pendiente_pago")
-      .gt("pedido.expira_en", new Date().toISOString())
-      .limit(1);
-
-    if (activeError) {
-      logDeleteFailure("active_order_check", activeError);
-      return res.status(500).json({ error: "internal_error" });
-    }
-
-    if ((activeItems ?? []).length > 0) {
-      return res.status(409).json({ error: "producto_en_pedido_activo" });
-    }
-
-    const { data, error } = await serviceClient
+    const { data, error } = await createPanelServiceClient()
       .from("producto")
       .delete()
       .eq("id", productoId)
@@ -232,7 +212,11 @@ async function deleteProducto(req: NextApiRequest, res: ApiResponse) {
       .maybeSingle();
 
     if (error) {
-      if (safeErrorCode(error) === "23503") {
+      const code = safeErrorCode(error);
+      if (code === "55006") {
+        return res.status(409).json({ error: "producto_en_pedido_activo" });
+      }
+      if (code === "23503") {
         return res.status(409).json({ error: "producto_en_uso" });
       }
       logDeleteFailure("delete", error);
