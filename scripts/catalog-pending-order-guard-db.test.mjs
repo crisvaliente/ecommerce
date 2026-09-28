@@ -122,7 +122,7 @@ async function withFixture(run) {
 }
 
 function assertPendingOrderGuard(error) {
-  assert.ok(error, "delete must be rejected");
+  assert.ok(error, "the change must be rejected");
   assert.equal(error.code, "55006");
   assert.equal(error.message, "producto_en_pedido_activo");
 }
@@ -206,5 +206,94 @@ test("a delete waits for a concurrent order insert and then rejects", async () =
     assert.ok(Date.now() - startedAt >= 1_000, "delete must wait for the order transaction");
     assertPendingOrderGuard(error);
     assert.equal(await rowExists("producto", fixture.simpleId), true);
+  });
+});
+
+async function setVariantMode(client, productId, usaVariantes) {
+  return client.from("producto").update({ usa_variantes: usaVariantes }).eq("id", productId).select("id");
+}
+
+test("switching the variant mode of a product in a pending order is rejected in both directions", async () => {
+  await withFixture(async (fixture) => {
+    const simpleOrder = await createOrder(fixture, { productoId: fixture.simpleId });
+    await createOrder(fixture, { productoId: fixture.variantProductId, varianteId: fixture.variantId });
+    const admin = authenticatedClient(fixture.adminAuthId);
+
+    assertPendingOrderGuard((await setVariantMode(admin, fixture.simpleId, true)).error);
+    assertPendingOrderGuard((await setVariantMode(service, fixture.variantProductId, false)).error);
+
+    const consolidation = await consolidateApprovedPayment(fixture, simpleOrder);
+    assert.ifError(consolidation.error);
+    assert.equal(consolidation.data[0].ok, true);
+  });
+});
+
+test("other product updates and switches without pending orders stay allowed", async () => {
+  await withFixture(async (fixture) => {
+    await createOrder(fixture, { productoId: fixture.simpleId });
+    await createOrder(fixture, { productoId: fixture.variantProductId, varianteId: fixture.variantId, expiresInMs: -HOUR_MS });
+
+    const priceUpdate = await service.from("producto").update({ precio: 120, nombre: "Simple renamed" }).eq("id", fixture.simpleId).select("id");
+    assert.ifError(priceUpdate.error);
+    assert.equal(priceUpdate.data.length, 1);
+
+    const expiredSwitch = await setVariantMode(service, fixture.variantProductId, false);
+    assert.ifError(expiredSwitch.error);
+    assert.equal(expiredSwitch.data.length, 1);
+  });
+});
+
+test("a mode switch waits for a concurrent order insert and then rejects", async () => {
+  await withFixture(async (fixture) => {
+    const pedidoId = await createOrder(fixture, { productoId: fixture.variantProductId, varianteId: fixture.variantId });
+    const { error: removeError } = await service.from("pedido_item").delete().eq("pedido_id", pedidoId);
+    assert.ifError(removeError);
+
+    const heldOrderItem = runHeldTransaction(`
+      insert into public.pedido_item (pedido_id, empresa_id, producto_id, variante_id, nombre_producto, talle, precio_unitario, cantidad)
+      values ('${pedidoId}', '${fixture.empresaId}', '${fixture.simpleId}', null, 'Concurrent item', null, 100, 1);
+    `);
+    await heldOrderItem.held;
+
+    const startedAt = Date.now();
+    const { error } = await setVariantMode(service, fixture.simpleId, true);
+    await heldOrderItem.done;
+    assert.ok(Date.now() - startedAt >= 1_000, "the switch must wait for the order transaction");
+    assertPendingOrderGuard(error);
+  });
+});
+
+test("an order insert waits for a concurrent mode switch and rejects the stale item", async () => {
+  await withFixture(async (fixture) => {
+    const heldSwitch = runHeldTransaction(`update public.producto set usa_variantes = true where id = '${fixture.simpleId}';`);
+    await heldSwitch.held;
+
+    const startedAt = Date.now();
+    const { error } = await service.rpc("crear_pedido_con_items_idempotente", {
+      p_usuario_id: fixture.buyerId,
+      p_empresa_id: fixture.empresaId,
+      p_direccion_envio_id: fixture.addressId,
+      p_items: [{ producto_id: fixture.simpleId, variante_id: null, cantidad: 1 }],
+      p_idempotency_key: randomUUID(),
+      p_request_fingerprint: "a".repeat(64),
+    });
+    await heldSwitch.done;
+    assert.ok(Date.now() - startedAt >= 1_000, "the order insert must wait for the mode switch");
+    assert.equal(error?.message, "variante_id_required");
+
+    const { count, error: countError } = await service
+      .from("pedido").select("id", { count: "exact", head: true }).eq("empresa_id", fixture.empresaId);
+    assert.ifError(countError);
+    assert.equal(count, 0, "the rejected checkout leaves no order behind");
+  });
+});
+
+test("the pending-order lookup is not callable by API roles", async () => {
+  await withFixture(async (fixture) => {
+    const anon = createClient(env.API_URL, env.ANON_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+    for (const client of [anon, authenticatedClient(fixture.adminAuthId)]) {
+      const { error } = await client.rpc("is_in_pending_order", { p_producto_id: fixture.simpleId, p_variante_id: null });
+      assert.equal(error?.code, "42501");
+    }
   });
 });
