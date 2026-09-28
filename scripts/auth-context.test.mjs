@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import test from "node:test";
+import test, { mock } from "node:test";
 
 const require = createRequire(import.meta.url);
 const Module = require("node:module");
@@ -130,7 +130,7 @@ function createHarness() {
     authEvent(session) { authListener("TOKEN_REFRESHED", session); },
     get activeSubscriptionCount() { return activeSubscriptions.size; },
     get value() { return latestValue; },
-    get state() { return { loading: states[0], sessionUser: states[1], dbUser: states[2] }; },
+    get state() { return { loading: states[0] === "loading", sessionUser: states[1], dbUser: states[2] }; },
   };
 }
 
@@ -303,7 +303,11 @@ const lookupError = { data: null, error: { message: "lookup failed" } };
 async function withConsole(method, run) {
   const original = console[method];
   const calls = [];
-  console[method] = (...args) => { calls.push(args); };
+  // Node prints its one-time MockTimers ExperimentalWarning through console.error; it is not an AuthContext log.
+  console[method] = (...args) => {
+    if (String(args[0]).includes("ExperimentalWarning: The MockTimers API")) return;
+    calls.push(args);
+  };
   try {
     await run(calls);
   } finally {
@@ -313,12 +317,28 @@ async function withConsole(method, run) {
 
 const withConsoleErrors = (run) => withConsole("error", run);
 
+// Mirrors PROFILE_RETRY_DELAY_MS in src/context/AuthContext.tsx; the boundary test fails if they diverge.
+const RETRY_DELAY_MS = 500;
+
+// Retry tests control the backoff timer; other tests keep real timers.
+function useMockTimers(t) {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  t.after(() => mock.timers.reset());
+}
+
+async function elapseRetryDelay() {
+  mock.timers.tick(RETRY_DELAY_MS);
+  await flush();
+}
+
+// An error-first lookup elapses the retry backoff, so those callers must call useMockTimers(t).
 async function loadSingleAccount(lookups) {
   const harness = createHarness();
   harness.sessions.push(settled(session("account-c")));
   harness.profiles.push(...lookups.map(settled));
   harness.render();
   await flush();
+  if (lookups[0]?.error) await elapseRetryDelay();
   harness.render();
   return harness;
 }
@@ -337,7 +357,8 @@ test("a missing profile is looked up once, never retried, never written from the
   });
 });
 
-test("a transient lookup error is retried once and publishes the recovered profile", async () => {
+test("a transient lookup error is retried once and publishes the recovered profile", async (t) => {
+  useMockTimers(t);
   await withConsoleErrors(async (errors) => {
     const harness = await loadSingleAccount([lookupError, profile("account-c")]);
     assert.deepEqual(harness.inserts, []);
@@ -348,7 +369,8 @@ test("a transient lookup error is retried once and publishes the recovered profi
   });
 });
 
-test("a repeated lookup error stops after one retry and publishes no profile", async () => {
+test("a repeated lookup error stops after one retry and publishes no profile", async (t) => {
+  useMockTimers(t);
   await withConsoleErrors(async (errors) => {
     const harness = await loadSingleAccount([lookupError, lookupError, profile("account-c")]);
     assert.deepEqual(harness.inserts, []);
@@ -360,7 +382,8 @@ test("a repeated lookup error stops after one retry and publishes no profile", a
   });
 });
 
-test("a retry superseded by a newer account cannot publish its profile", async () => {
+test("a retry superseded by a newer account cannot publish its profile", async (t) => {
+  useMockTimers(t);
   await withConsoleErrors(async () => {
     const harness = createHarness();
     const firstSession = deferred();
@@ -374,6 +397,7 @@ test("a retry superseded by a newer account cannot publish its profile", async (
     firstSession.resolve(session("account-a"));
     await firstSession.promise;
     await flush();
+    await elapseRetryDelay();
     assert.deepEqual(harness.queriedUids, ["account-a", "account-a"]);
 
     harness.authEvent({ user: user("account-b") });
@@ -398,11 +422,13 @@ async function startPendingRetry(harness) {
   harness.profiles.push(settled(lookupError), retryLookup);
   harness.render();
   await flush();
+  await elapseRetryDelay();
   assert.deepEqual(harness.queriedUids, ["account-a", "account-a"]);
   return retryLookup;
 }
 
-test("a retry pending during logout cannot publish its profile", async () => {
+test("a retry pending during logout cannot publish its profile", async (t) => {
+  useMockTimers(t);
   await withConsoleErrors(async () => {
     const harness = createHarness();
     const retryLookup = await startPendingRetry(harness);
@@ -419,7 +445,8 @@ test("a retry pending during logout cannot publish its profile", async () => {
   });
 });
 
-test("a retry pending during unmount cannot publish its profile", async () => {
+test("a retry pending during unmount cannot publish its profile", async (t) => {
+  useMockTimers(t);
   await withConsoleErrors(async () => {
     const harness = createHarness();
     const retryLookup = await startPendingRetry(harness);
@@ -432,6 +459,97 @@ test("a retry pending during unmount cannot publish its profile", async () => {
     assert.equal(harness.state.dbUser, null);
     assert.equal(harness.state.loading, true);
   });
+});
+
+test("the retry waits for the backoff delay before looking up again", async (t) => {
+  useMockTimers(t);
+  await withConsoleErrors(async () => {
+    const harness = createHarness();
+    harness.sessions.push(settled(session("account-a")));
+    harness.profiles.push(settled(lookupError), settled(profile("account-a")));
+    harness.render();
+    await flush();
+    assert.deepEqual(harness.queriedUids, ["account-a"]);
+
+    mock.timers.tick(RETRY_DELAY_MS - 1);
+    await flush();
+    assert.deepEqual(harness.queriedUids, ["account-a"]);
+    harness.render();
+    assert.equal(harness.value.profileStatus, "loading");
+
+    mock.timers.tick(1);
+    await flush();
+    harness.render();
+    assert.deepEqual(harness.queriedUids, ["account-a", "account-a"]);
+    assert.equal(harness.value.profileStatus, "ready");
+  });
+});
+
+test("logout during the backoff delay cancels the retry lookup", async (t) => {
+  useMockTimers(t);
+  await withConsoleErrors(async () => {
+    const harness = createHarness();
+    harness.sessions.push(settled(session("account-a")));
+    harness.profiles.push(settled(lookupError), settled(profile("account-a")));
+    harness.render();
+    await flush();
+
+    await harness.value.signOut();
+    await elapseRetryDelay();
+    harness.render();
+
+    assert.deepEqual(harness.queriedUids, ["account-a"]);
+    assert.equal(harness.value.dbUser, null);
+    assert.equal(harness.value.profileStatus, "anonymous");
+  });
+});
+
+// profileStatus separates "no session", "no profile" and "lookup failed", which dbUser === null conflates.
+test("profileStatus reports loading until the first load settles", () => {
+  const harness = createHarness();
+  harness.sessions.push(deferred());
+  harness.render();
+  assert.equal(harness.value.profileStatus, "loading");
+  assert.equal(harness.value.loading, true);
+});
+
+test("profileStatus is ready when the own profile is found", async () => {
+  const harness = await loadSingleAccount([profile("account-c")]);
+  assert.equal(harness.value.profileStatus, "ready");
+  assert.equal(harness.value.loading, false);
+});
+
+test("profileStatus is missing when the lookup succeeds without a profile", async () => {
+  await withConsole("warn", async () => {
+    const harness = await loadSingleAccount([{ data: null, error: null }]);
+    assert.equal(harness.value.profileStatus, "missing");
+    assert.equal(harness.value.loading, false);
+  });
+});
+
+test("profileStatus is error when the lookup and its retry both fail", async (t) => {
+  useMockTimers(t);
+  await withConsoleErrors(async () => {
+    const harness = await loadSingleAccount([lookupError, lookupError]);
+    assert.equal(harness.value.profileStatus, "error");
+    assert.equal(harness.value.dbUser, null);
+    assert.equal(harness.value.loading, false);
+  });
+});
+
+test("profileStatus is anonymous without a session and after logout", async () => {
+  const guest = createHarness();
+  guest.sessions.push(settled({ data: { session: null }, error: null }));
+  guest.render();
+  await flush();
+  guest.render();
+  assert.equal(guest.value.profileStatus, "anonymous");
+
+  const member = await loadSingleAccount([profile("account-c")]);
+  await member.value.signOut();
+  member.render();
+  assert.equal(member.value.profileStatus, "anonymous");
+  assert.equal(member.value.loading, false);
 });
 
 test("anonymous sessions and returned getSession errors clear both users", async () => {

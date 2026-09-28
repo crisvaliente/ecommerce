@@ -21,15 +21,28 @@ export interface CustomUser {
   empresa_id: string | null;
 }
 
+/**
+ * Resultado de la última carga. Distingue lo que `dbUser === null` no puede:
+ * sin sesión (anonymous), sesión sin perfil (missing) y fallo de lectura (error).
+ */
+export type ProfileStatus = "loading" | "anonymous" | "ready" | "missing" | "error";
+
 interface AuthContextType {
   sessionUser: User | null;
   dbUser: CustomUser | null;
+  profileStatus: ProfileStatus;
+  /** Equivale a `profileStatus === "loading"`. */
   loading: boolean;
   refresh: () => Promise<void>;
   signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+/** Espera antes del único reintento tras un error de lectura del perfil. */
+const PROFILE_RETRY_DELAY_MS = 500;
+
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 function fetchOwnProfile(uid: string) {
   return supabase
@@ -40,7 +53,7 @@ function fetchOwnProfile(uid: string) {
 }
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [loading, setLoading] = useState(true);
+  const [profileStatus, setProfileStatus] = useState<ProfileStatus>("loading");
   const [sessionUser, setSessionUser] = useState<User | null>(null);
   const [dbUser, setDbUser] = useState<CustomUser | null>(null);
 
@@ -65,7 +78,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const isCurrentLoad = () =>
       mountedRef.current && loadVersionRef.current === loadVersion;
 
-    safeSet(setLoading, true);
+    safeSet(setProfileStatus, "loading");
 
     // 1) Sesión actual
     const {
@@ -81,7 +94,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // 2) Invitado
     if (!u) {
       safeSet(setDbUser, null);
-      safeSet(setLoading, false);
+      safeSet(setProfileStatus, "anonymous");
       return;
     }
 
@@ -90,9 +103,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     let { data, error } = await fetchOwnProfile(u.id);
     if (!isCurrentLoad()) return;
 
-    // 4) Un error de lectura (no un perfil inexistente) se reintenta una sola vez.
+    // 4) Un error de lectura (no un perfil inexistente) se reintenta una sola vez,
+    // tras una espera corta.
     if (error) {
       console.error("[auth] fetch usuario error:", error);
+      await wait(PROFILE_RETRY_DELAY_MS);
+      if (!isCurrentLoad()) return;
       ({ data, error } = await fetchOwnProfile(u.id));
       if (!isCurrentLoad()) return;
       if (error) console.error("[auth] fetch usuario retry error:", error);
@@ -105,7 +121,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     // 5) Setear estado
     safeSet(setDbUser, profile);
-    safeSet(setLoading, false);
+    safeSet(setProfileStatus, error ? "error" : profile ? "ready" : "missing");
   }, [safeSet]);
 
   // ✅ Effect depende de load (función estable)
@@ -133,14 +149,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     ++loadVersionRef.current;
     safeSet(setSessionUser, null);
     safeSet(setDbUser, null);
-    safeSet(setLoading, false);
+    safeSet(setProfileStatus, "anonymous");
     await supabase.auth.signOut();
   }, [safeSet]);
 
   // ✅ Memo incluye load y signOut
   const value = useMemo<AuthContextType>(
-    () => ({ sessionUser, dbUser, loading, refresh: load, signOut }),
-    [sessionUser, dbUser, loading, load, signOut]
+    () => ({
+      sessionUser,
+      dbUser,
+      profileStatus,
+      loading: profileStatus === "loading",
+      refresh: load,
+      signOut,
+    }),
+    [sessionUser, dbUser, profileStatus, load, signOut]
   );
 
   return (
