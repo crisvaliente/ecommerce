@@ -27,11 +27,15 @@ type PanelAdmissionInput = {
   pathname: unknown;
   sessionUser: ObservedSessionUser;
   dbUser: ObservedDbUser;
+  /** AuthContext `profileStatus`; only `"error"` changes the outcome. */
+  profileStatus?: unknown;
 };
 
 export type PanelAdmission =
   | { kind: "allow" }
   | { kind: "loading" }
+  /** The own-profile lookup failed; retryable, never an admission. */
+  | { kind: "profile-error" }
   | { kind: "redirect"; destination: "/auth/login" | "/auth/no-autorizado" | "/auth/registroempresa" };
 
 const noAuthorization = (): PanelAdmission => ({
@@ -61,6 +65,7 @@ export function decidePanelAdmission({
   pathname,
   sessionUser,
   dbUser,
+  profileStatus,
 }: PanelAdmissionInput): PanelAdmission {
   if (loading === true) return { kind: "loading" };
   if (loading !== false) return noAuthorization();
@@ -70,6 +75,7 @@ export function decidePanelAdmission({
   if (typeof sessionUser !== "object") return noAuthorization();
   const sessionUid = hasOwnString(sessionUser, "id");
   if (!sessionUid) return noAuthorization();
+  if (profileStatus === "error") return { kind: "profile-error" };
   if (dbUser === null || dbUser === undefined || typeof dbUser !== "object") {
     return noAuthorization();
   }

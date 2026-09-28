@@ -128,6 +128,7 @@ test("withholds the protected layout for denied admissions", () => {
     { name: "malformed identity", auth: { ...validUser(), sessionUser: {} } },
     { name: "missing company", auth: { ...validUser(), dbUser: { ...validUser().dbUser, empresa_id: null } } },
     { name: "loading", auth: { ...validUser(), loading: true } },
+    { name: "profile error", auth: { ...validUser(), dbUser: null, profileStatus: "error" } },
   ];
 
   for (const scenario of cases) {

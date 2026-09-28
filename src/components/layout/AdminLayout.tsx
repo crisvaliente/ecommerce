@@ -31,13 +31,14 @@ const PanelInterstitial: React.FC<InterstitialProps> = ({ title, message }) => {
 };
 
 const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
-  const { sessionUser, dbUser, loading } = useAuth();
+  const { sessionUser, dbUser, loading, profileStatus } = useAuth();
   const router = useRouter();
   const admission = decidePanelAdmission({
     loading,
     pathname: router.pathname,
     sessionUser,
     dbUser,
+    profileStatus,
   });
 
   useEffect(() => {
@@ -58,6 +59,16 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       <PanelInterstitial
         title="Redirigiendo"
         message="Estamos verificando tu acceso y llevandote a la pantalla correcta."
+      />
+    );
+  }
+
+  // PanelRouteGate offers the retry; this layout only fails closed on any non-allow outcome.
+  if (admission.kind !== "allow") {
+    return (
+      <PanelInterstitial
+        title="No pudimos cargar tu perfil"
+        message="Revisá tu conexión e intentá de nuevo."
       />
     );
   }

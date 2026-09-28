@@ -202,6 +202,67 @@ test("keeps loading and malformed observed auth state from mounting panel childr
   }
 });
 
+// A failed profile lookup is retryable, not a denial: it must neither admit nor send the user to no-autorizado.
+test("a profile lookup error yields a retryable profile-error admission", () => {
+  const profileError = { ...validAuth, dbUser: null, profileStatus: "error", pathname: "/panel" };
+  assert.deepEqual(decision(profileError), { kind: "profile-error" });
+  assert.deepEqual(decision({ ...profileError, pathname: "/panel/payments" }), { kind: "profile-error" });
+});
+
+test("profile status never overrides session or missing-profile outcomes", () => {
+  assert.deepEqual(
+    decision({ ...validAuth, sessionUser: null, dbUser: null, profileStatus: "error", pathname: "/panel" }),
+    { kind: "redirect", destination: "/auth/login" },
+  );
+  assert.deepEqual(
+    decision({ ...validAuth, dbUser: null, profileStatus: "missing", pathname: "/panel" }),
+    { kind: "redirect", destination: "/auth/no-autorizado" },
+  );
+  assert.deepEqual(decision({ ...validAuth, profileStatus: "ready", pathname: "/panel" }), { kind: "allow" });
+});
+
+test("the gate shows a retry action for a profile error instead of the panel", () => {
+  let refreshes = 0;
+  const auth = { ...validAuth, dbUser: null, profileStatus: "error", refresh: async () => { refreshes += 1; } };
+  let calls = 0;
+  const Page = () => {
+    calls += 1;
+    return require("react").createElement("div", { "data-protected-page": true });
+  };
+
+  const markup = renderApp({ pathname: "/panel", auth }, Page);
+  assert.equal(calls, 0);
+  assert.doesNotMatch(markup, /data-protected-page/);
+  assert.match(markup, /role="alert"/);
+  assert.match(markup, /No pudimos cargar tu perfil/);
+
+  const button = withModuleLoader({ pathname: "/panel", auth }, () => {
+    const React = require("react");
+    const originalUseEffect = React.useEffect;
+    React.useEffect = () => {};
+    try {
+      const PanelRouteGate = require(GATE_FILE).default;
+      return findElement(PanelRouteGate({ children: null }), (element) => element.type === "button");
+    } finally {
+      React.useEffect = originalUseEffect;
+    }
+  });
+  assert.match(String(button.props.children), /Reintentar/);
+  button.props.onClick();
+  assert.equal(refreshes, 1);
+});
+
+function findElement(node, matches) {
+  if (!node || typeof node !== "object") return null;
+  if (matches(node)) return node;
+  const children = [node.props?.children].flat();
+  for (const child of children) {
+    const found = findElement(child, matches);
+    if (found) return found;
+  }
+  return null;
+}
+
 test("keeps public routes outside the panel gate", () => {
   let calls = 0;
   const PublicPage = () => {
