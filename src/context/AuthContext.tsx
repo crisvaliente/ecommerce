@@ -44,12 +44,27 @@ const PROFILE_RETRY_DELAY_MS = 500;
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-function fetchOwnProfile(uid: string) {
-  return supabase
-    .from("usuario")
-    .select("id, supabase_uid, nombre, correo, rol, empresa_id")
-    .eq("supabase_uid", uid)
-    .maybeSingle();
+// Both readers turn a thrown call into a returned error, so load() and refresh() never reject.
+async function readSessionUser(): Promise<{ user: User | null; error: unknown }> {
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    return { user: data.session?.user ?? null, error };
+  } catch (error) {
+    return { user: null, error };
+  }
+}
+
+async function fetchOwnProfile(uid: string): Promise<{ data: CustomUser | null; error: unknown }> {
+  try {
+    const { data, error } = await supabase
+      .from("usuario")
+      .select("id, supabase_uid, nombre, correo, rol, empresa_id")
+      .eq("supabase_uid", uid)
+      .maybeSingle();
+    return { data: (data as CustomUser | null) ?? null, error };
+  } catch (error) {
+    return { data: null, error };
+  }
 }
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
@@ -81,14 +96,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     safeSet(setProfileStatus, "loading");
 
     // 1) Sesión actual
-    const {
-      data: { session },
-      error: sErr,
-    } = await supabase.auth.getSession();
+    const { user: u, error: sErr } = await readSessionUser();
     if (!isCurrentLoad()) return;
-    if (sErr) console.debug("[auth] getSession error:", sErr);
+    if (sErr) console.warn("[auth] getSession error:", sErr);
 
-    const u = session?.user ?? null;
     safeSet(setSessionUser, u);
 
     // 2) Invitado
@@ -117,7 +128,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.warn("[auth] usuario sin perfil para la sesión actual");
     }
 
-    const profile: CustomUser | null = error ? null : (data as CustomUser) ?? null;
+    const profile: CustomUser | null = error ? null : data;
 
     // 5) Setear estado
     safeSet(setDbUser, profile);

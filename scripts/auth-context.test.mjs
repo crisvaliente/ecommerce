@@ -243,17 +243,23 @@ test("an old profile completion leaves the current load pending", async () => {
   harness.render();
   firstSession.resolve(session("account-a"));
   await firstSession.promise;
+  await flush();
+  assert.deepEqual(harness.queriedUids, ["account-a"]);
   harness.authEvent({ user: user("account-b") });
   secondSession.resolve(session("account-b"));
   await secondSession.promise;
+  await flush();
+  assert.deepEqual(harness.queriedUids, ["account-a", "account-b"]);
   firstProfile.resolve(profile("account-a"));
   await firstProfile.promise;
+  await flush();
   harness.render();
   assert.equal(harness.value.sessionUser.id, "account-b");
   assert.equal(harness.value.loading, true);
 
   secondProfile.resolve(profile("account-b"));
   await secondProfile.promise;
+  await flush();
   harness.render();
   assert.equal(harness.value.dbUser.supabase_uid, "account-b");
   assert.equal(harness.value.loading, false);
@@ -273,6 +279,8 @@ test("logout invalidates pending work and cannot clear a newer account", async (
   harness.render();
   sessionA.resolve(session("account-a"));
   await sessionA.promise;
+  await flush();
+  assert.deepEqual(harness.queriedUids, ["account-a"]);
   const pendingSignOut = harness.value.signOut();
   harness.render();
   assert.deepEqual(harness.value, { ...harness.value, sessionUser: null, dbUser: null, loading: false });
@@ -282,6 +290,7 @@ test("logout invalidates pending work and cannot clear a newer account", async (
   await sessionB.promise;
   profileB.resolve(profile("account-b"));
   await profileB.promise;
+  await flush();
   harness.render();
   signOut.resolve({ error: null });
   await pendingSignOut;
@@ -552,16 +561,78 @@ test("profileStatus is anonymous without a session and after logout", async () =
   assert.equal(member.value.loading, false);
 });
 
-test("anonymous sessions and returned getSession errors clear both users", async () => {
-  const harness = createHarness();
-  harness.sessions.push(settled({ data: { session: null }, error: { message: "expired" } }));
+// Created on access so the rejection is never observed as unhandled before the provider awaits it.
+const thrown = (message) => ({ get promise() { return Promise.reject(new Error(message)); } });
 
-  harness.render();
-  await flush();
-  harness.render();
-  assert.equal(harness.value.sessionUser, null);
-  assert.equal(harness.value.dbUser, null);
-  assert.equal(harness.value.loading, false);
+test("a thrown getSession is handled like a returned session error", async () => {
+  await withConsole("warn", async (warnings) => {
+    const harness = createHarness();
+    harness.sessions.push(settled({ data: { session: null }, error: null }), thrown("storage unavailable"));
+    harness.render();
+    await flush();
+
+    await assert.doesNotReject(harness.value.refresh());
+    harness.render();
+    assert.equal(harness.value.sessionUser, null);
+    assert.equal(harness.value.dbUser, null);
+    assert.equal(harness.value.profileStatus, "anonymous");
+    assert.equal(warnings.length, 1);
+  });
+});
+
+test("a thrown profile lookup is retried like a returned lookup error", async (t) => {
+  useMockTimers(t);
+  await withConsoleErrors(async (errors) => {
+    const harness = createHarness();
+    harness.sessions.push(settled(session("account-c")));
+    harness.profiles.push(thrown("network down"), settled(profile("account-c")));
+    harness.render();
+    await flush();
+    await elapseRetryDelay();
+    harness.render();
+
+    assert.deepEqual(harness.queriedUids, ["account-c", "account-c"]);
+    assert.equal(harness.value.dbUser.supabase_uid, "account-c");
+    assert.equal(harness.value.profileStatus, "ready");
+    assert.equal(errors.length, 1);
+  });
+});
+
+test("a refresh whose lookup and retry both throw settles as a profile error", async (t) => {
+  useMockTimers(t);
+  await withConsoleErrors(async () => {
+    const harness = createHarness();
+    harness.sessions.push(settled({ data: { session: null }, error: null }), settled(session("account-c")));
+    harness.profiles.push(thrown("network down"), thrown("network down"));
+    harness.render();
+    await flush();
+
+    const pendingRefresh = harness.value.refresh();
+    await flush();
+    await elapseRetryDelay();
+    await assert.doesNotReject(pendingRefresh);
+    harness.render();
+
+    assert.equal(harness.value.sessionUser.id, "account-c");
+    assert.equal(harness.value.dbUser, null);
+    assert.equal(harness.value.profileStatus, "error");
+  });
+});
+
+test("anonymous sessions and returned getSession errors clear both users", async () => {
+  await withConsole("warn", async (warnings) => {
+    const harness = createHarness();
+    harness.sessions.push(settled({ data: { session: null }, error: { message: "expired" } }));
+
+    harness.render();
+    await flush();
+    harness.render();
+    assert.equal(harness.value.sessionUser, null);
+    assert.equal(harness.value.dbUser, null);
+    assert.equal(harness.value.loading, false);
+    // Visible by default in browsers, unlike console.debug.
+    assert.equal(warnings.length, 1);
+  });
 });
 
 test("a refresh superseded by an auth event cannot publish after the event", async () => {
