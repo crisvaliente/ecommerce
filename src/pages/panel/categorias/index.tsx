@@ -15,6 +15,54 @@ type CategoriasApiResponse = {
   items: Categoria[];
 };
 
+type CategoriaWrite = {
+  method: "POST" | "PATCH" | "DELETE";
+  id?: string;
+  body?: Pick<Categoria, "nombre" | "slug" | "descripcion" | "orden">;
+};
+
+const CATEGORIAS_ENDPOINT = "/api/panel/categorias";
+
+const WRITE_ERROR_MESSAGES: Record<string, string> = {
+  categoria_duplicada: "Ya existe una categoría con ese nombre.",
+  categoria_en_uso: "No se puede eliminar: hay productos que usan esta categoría.",
+  categoria_no_encontrada: "La categoría ya no existe. Recargá el listado.",
+};
+
+async function getAccessToken(): Promise<string | null> {
+  const {
+    data: { session },
+    error,
+  } = await supabase.auth.getSession();
+
+  if (error) console.error("[categorias] getSession error:", error);
+  return session?.access_token ?? null;
+}
+
+/** Returns null on success, or the API error code. */
+async function sendCategoriaWrite({ method, id, body }: CategoriaWrite): Promise<string | null> {
+  const accessToken = await getAccessToken();
+  if (!accessToken) return "unauthorized";
+
+  const url = id ? `${CATEGORIAS_ENDPOINT}?id=${encodeURIComponent(id)}` : CATEGORIAS_ENDPOINT;
+  const response = await fetch(
+    url,
+    body
+      ? {
+          method,
+          headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+      : { method, headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  if (response.ok) return null;
+
+  const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
+  const code = typeof payload?.error === "string" ? payload.error : "unknown_error";
+  console.error("[categorias] write error:", method, response.status, code);
+  return code;
+}
+
 const slugify = (text: string) =>
   text
     .toLowerCase()
@@ -47,14 +95,7 @@ const CategoriasPage: React.FC = () => {
     try {
       setLoadingCategorias(true);
 
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.getSession();
-
-      if (sessionError) console.error("[categorias] getSession error:", sessionError);
-
-      const accessToken = session?.access_token;
+      const accessToken = await getAccessToken();
       if (!accessToken) {
         if (isCurrentRequest()) {
           setCategorias([]);
@@ -63,7 +104,7 @@ const CategoriasPage: React.FC = () => {
         return;
       }
 
-      const response = await fetch("/api/panel/categorias", {
+      const response = await fetch(CATEGORIAS_ENDPOINT, {
         method: "GET",
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -122,14 +163,16 @@ const CategoriasPage: React.FC = () => {
     if (!confirm("¿Eliminar esta categoría? (Si hay productos usándola, puede fallar)")) return;
     try {
       setSaving(true);
-      const { error } = await supabase.from("categoria").delete().eq("id", id);
-      if (error) throw error;
+      setErrorMsg(null);
+      const errorCode = await sendCategoriaWrite({ method: "DELETE", id });
+      if (errorCode) {
+        setErrorMsg(WRITE_ERROR_MESSAGES[errorCode] ?? "No se pudo eliminar la categoría.");
+        return;
+      }
       await fetchCategorias();
     } catch (err) {
       console.error("Error eliminando categoría", err);
-      setErrorMsg(
-        "No se pudo eliminar la categoría. Verificá si no tiene productos asociados."
-      );
+      setErrorMsg("No se pudo eliminar la categoría.");
     } finally {
       setSaving(false);
     }
@@ -138,10 +181,6 @@ const CategoriasPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!empresaId) {
-      setErrorMsg("No se encontró empresa asociada al usuario.");
-      return;
-    }
     if (!nombre.trim()) {
       setErrorMsg("El nombre es obligatorio.");
       return;
@@ -153,29 +192,19 @@ const CategoriasPage: React.FC = () => {
       setSaving(true);
       setErrorMsg(null);
 
-      if (editingId) {
-        const { error } = await supabase
-          .from("categoria")
-          .update({
-            nombre: nombre.trim(),
-            slug: finalSlug,
-            descripcion: descripcion.trim() || null,
-            orden: typeof orden === "number" ? orden : null,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", editingId);
-
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from("categoria").insert({
-          empresa_id: empresaId,
+      const errorCode = await sendCategoriaWrite({
+        method: editingId ? "PATCH" : "POST",
+        id: editingId ?? undefined,
+        body: {
           nombre: nombre.trim(),
           slug: finalSlug,
           descripcion: descripcion.trim() || null,
           orden: typeof orden === "number" ? orden : null,
-        });
-
-        if (error) throw error;
+        },
+      });
+      if (errorCode) {
+        setErrorMsg(WRITE_ERROR_MESSAGES[errorCode] ?? "No se pudo guardar la categoría.");
+        return;
       }
 
       resetForm();
@@ -333,7 +362,8 @@ const CategoriasPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => handleDelete(cat.id)}
-                        className="text-red-600 hover:underline"
+                        disabled={saving}
+                        className="text-red-600 hover:underline disabled:opacity-50"
                       >
                         Eliminar
                       </button>
