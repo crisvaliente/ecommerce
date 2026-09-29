@@ -297,3 +297,92 @@ test("the pending-order lookup is not callable by API roles", async () => {
     }
   });
 });
+
+async function switchToVariants(fixture, client = service, empresaId = fixture.empresaId) {
+  return client.rpc("pasar_producto_a_variantes", { p_producto_id: fixture.simpleId, p_empresa_id: empresaId });
+}
+
+async function productState(fixture) {
+  const { data: product, error } = await service.from("producto").select("usa_variantes, stock").eq("id", fixture.simpleId).single();
+  assert.ifError(error);
+  const { data: variants, error: variantsError } = await service
+    .from("producto_variante").select("talle, stock, activo").eq("producto_id", fixture.simpleId).order("talle");
+  assert.ifError(variantsError);
+  return { ...product, variants };
+}
+
+test("switching to variants moves the simple stock into one variant in a single transaction", async () => {
+  await withFixture(async (fixture) => {
+    const { data, error } = await switchToVariants(fixture);
+    assert.ifError(error);
+    assert.equal(data.length, 1);
+    assert.equal(data[0].ok, true);
+    assert.equal(data[0].codigo_resultado, "modo_variantes_activado");
+    assert.equal(data[0].stock_migrado, 10);
+    assert.equal(typeof data[0].variante_id, "string");
+    assert.deepEqual(await productState(fixture), {
+      usa_variantes: true, stock: 0, variants: [{ talle: "Único", stock: 10, activo: true }],
+    });
+  });
+});
+
+test("a product in a pending order keeps its mode, stock and variants", async () => {
+  await withFixture(async (fixture) => {
+    await createOrder(fixture, { productoId: fixture.simpleId });
+    const { error } = await switchToVariants(fixture);
+    assertPendingOrderGuard(error);
+    assert.deepEqual(await productState(fixture), { usa_variantes: false, stock: 10, variants: [] });
+  });
+});
+
+test("leftover single-size variants are reused once and never double the stock", async () => {
+  await withFixture(async (fixture) => {
+    for (const [talle, stock, activo] of [["Unico", 3, false], ["Único", 5, true], ["M", 4, true]]) {
+      await trackedInsert(service, fixture.registry, "producto_variante", {
+        id: randomUUID(), empresa_id: fixture.empresaId, producto_id: fixture.simpleId, talle, stock, activo,
+      });
+    }
+    const { data, error } = await switchToVariants(fixture);
+    assert.ifError(error);
+    assert.equal(data[0].stock_migrado, 10);
+    assert.deepEqual(await productState(fixture), {
+      usa_variantes: true,
+      stock: 0,
+      variants: [
+        { talle: "M", stock: 4, activo: true },
+        { talle: "Unico", stock: 10, activo: true },
+        { talle: "Único", stock: 5, activo: false },
+      ],
+    });
+  });
+});
+
+test("switching without stock, twice, or for another company changes nothing unexpected", async () => {
+  await withFixture(async (fixture) => {
+    const foreign = await switchToVariants(fixture, service, randomUUID());
+    assert.ifError(foreign.error);
+    assert.deepEqual(foreign.data[0], { ok: false, codigo_resultado: "producto_no_encontrado", variante_id: null, stock_migrado: 0 });
+
+    const { error: stockError } = await service.from("producto").update({ stock: -2 }).eq("id", fixture.simpleId);
+    assert.ifError(stockError);
+    const empty = await switchToVariants(fixture);
+    assert.ifError(empty.error);
+    assert.deepEqual(empty.data[0], { ok: true, codigo_resultado: "modo_variantes_activado", variante_id: null, stock_migrado: 0 });
+
+    const again = await switchToVariants(fixture);
+    assert.ifError(again.error);
+    assert.deepEqual(again.data[0], { ok: true, codigo_resultado: "ya_usa_variantes", variante_id: null, stock_migrado: 0 });
+    assert.deepEqual(await productState(fixture), { usa_variantes: true, stock: 0, variants: [] });
+  });
+});
+
+test("only the service role can switch a product to variants", async () => {
+  await withFixture(async (fixture) => {
+    const anon = createClient(env.API_URL, env.ANON_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+    for (const client of [anon, authenticatedClient(fixture.adminAuthId)]) {
+      const { error } = await switchToVariants(fixture, client);
+      assert.equal(error?.code, "42501");
+    }
+    assert.deepEqual(await productState(fixture), { usa_variantes: false, stock: 10, variants: [] });
+  });
+});
