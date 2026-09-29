@@ -1077,86 +1077,65 @@ const handleDraft = async () => {
       showError("Primero creá el producto para poder activar variantes.");
       return;
     }
-    if (!empresaId) return;
+
+    const ok = confirm(
+      "¿Pasar a modo variantes?\n\nSi el producto tiene stock simple, se migrará a una variante inicial \"Único\" y, a partir de entonces, el stock se gestionará desde variantes."
+    );
+    if (!ok) return;
 
     setSwitchingToVariantes(true);
 
     try {
-      const { data: prod, error: prodErr } = await supabase
-        .from("producto")
-        .select("id, empresa_id, stock, usa_variantes")
-        .eq("id", productoId)
-        .eq("empresa_id", empresaId)
-        .single<{
-          id: string;
-          empresa_id: string;
-          stock: number;
-          usa_variantes: boolean | null;
-        }>();
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+      if (sessionError) console.error("[producto] getSession error:", sessionError);
 
-      if (prodErr) throw prodErr;
-      if (!prod) throw new Error("Producto no encontrado.");
-
-      if (prod.usa_variantes) {
-        await fetchResumenStock();
-        await fetchVariantes();
-        setUsaVariantes(true);
-        showSuccess("El producto ya estaba configurado para usar variantes.");
+      const accessToken = session?.access_token;
+      if (!accessToken) {
+        showError("Sesión no válida. Volvé a iniciar sesión.");
         return;
       }
 
-      const stockDB = Number(prod.stock ?? 0);
-      const stockToMigrate = Number.isFinite(stockDB) ? stockDB : 0;
+      // The endpoint moves the stock and switches the mode in one transaction.
+      const response = await fetch(
+        `/api/panel/productos/${encodeURIComponent(productoId)}/modo-variantes`,
+        { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      const payload = (await response.json().catch(() => null)) as {
+        codigo_resultado?: string;
+        stock_migrado?: number;
+        estado?: string;
+        error?: string;
+      } | null;
 
-      const confirmMessage =
-        stockToMigrate > 0
-          ? `¿Pasar a modo variantes?\n\nEste producto tiene stock simple actual (${stockToMigrate}). Ese stock se migrará a una variante inicial \"Único\" y, a partir de entonces, el stock se gestionará desde variantes.`
-          : "¿Pasar a modo variantes?\n\nA partir de este cambio, el stock se gestionará desde variantes.";
-
-      const ok = confirm(confirmMessage);
-      if (!ok) return;
-
-      const shouldMigrate = stockToMigrate > 0;
-
-      if (shouldMigrate) {
-        const { data: existing, error: exErr } = await supabase
-          .from("producto_variante")
-          .select("id, talle")
-          .eq("empresa_id", empresaId)
-          .eq("producto_id", productoId)
-          .or("talle.eq.Único,talle.eq.Unico,talle.eq.General")
-          .limit(1);
-
-        if (exErr) throw exErr;
-
-        if (!existing || existing.length === 0) {
-          const { error: insErr } = await supabase.from("producto_variante").insert([
-            {
-              empresa_id: empresaId,
-              producto_id: productoId,
-              talle: "Único",
-              stock: stockToMigrate,
-              activo: true,
-            },
-          ]);
-          if (insErr) throw insErr;
-        }
+      if (!response.ok) {
+        console.error("Error pasando a variantes:", response.status, payload?.error);
+        showError(
+          response.status === 401
+            ? "Sesión no válida. Volvé a iniciar sesión."
+            : productFormErrorMessage(payload, "variant_mode_switch")
+        );
+        return;
       }
 
-      const { error: updErr } = await supabase
-        .from("producto")
-        .update({ usa_variantes: true })
-        .eq("id", productoId)
-        .eq("empresa_id", empresaId);
-
-      if (updErr) throw updErr;
-
+      // The switch is committed; the stock summary re-reads the mode from the database.
+      if (payload?.estado) {
+        setForm((prev) => ({ ...prev, estado: toProductoEstado(payload.estado) }));
+      }
       await fetchResumenStock();
-      setUsaVariantes(true);
       await fetchVariantes();
-      showSuccess("Modo variantes activado correctamente.");
+
+      let message = "Modo variantes activado correctamente.";
+      if (payload?.codigo_resultado === "ya_usa_variantes") {
+        message = "El producto ya estaba configurado para usar variantes.";
+      } else if (payload?.stock_migrado) {
+        message = `Modo variantes activado. Se pasaron ${payload.stock_migrado} unidades a la variante "Único".`;
+      }
+      showSuccess(message);
     } catch (err: unknown) {
-      console.error("Error pasando a variantes (B1.4):", err);
+      console.error("Error pasando a variantes:", err);
       showError(productFormErrorMessage(err, "variant_mode_switch"));
     } finally {
       setSwitchingToVariantes(false);

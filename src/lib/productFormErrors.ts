@@ -17,11 +17,13 @@ const PENDING_ORDER_MESSAGES: Partial<Record<ProductFormErrorContext, string>> =
 
 function errorCode(error: unknown): string | null {
   if (typeof error !== "object" || error === null) return null;
-  const code = (error as { code?: unknown }).code;
+  const { code, error: apiError } = error as { code?: unknown; error?: unknown };
+  // Panel API routes report the same guard as { error: "producto_en_pedido_activo" }.
+  if (apiError === "producto_en_pedido_activo") return "55006";
   return typeof code === "string" ? code : null;
 }
 
-/** User-facing message for a Supabase error; database text is never shown. */
+/** User-facing message for a Supabase or panel API error; database text is never shown. */
 export function productFormErrorMessage(error: unknown, context: ProductFormErrorContext): string {
   const code = errorCode(error);
 

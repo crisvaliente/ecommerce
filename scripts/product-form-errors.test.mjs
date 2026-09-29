@@ -18,6 +18,13 @@ test("a pending-order guard explains why the action was blocked", () => {
   );
 });
 
+test("the panel API pending-order error maps like the database code", () => {
+  assert.equal(
+    productFormErrorMessage({ error: "producto_en_pedido_activo" }, "variant_mode_switch"),
+    productFormErrorMessage(PENDING_ORDER, "variant_mode_switch"),
+  );
+});
+
 test("a duplicate size is reported only when saving a variant", () => {
   assert.equal(productFormErrorMessage(DUPLICATE, "variant_save"), "Ya existe una variante con ese talle.");
   assert.equal(productFormErrorMessage(DUPLICATE, "variant_delete"), "No se pudo eliminar la variante.");
@@ -39,5 +46,13 @@ test("ProductForm maps variant and mode-switch errors through the shared helper"
   const source = await readFile(new URL("../src/pages/panel/productos/ProductForm.tsx", import.meta.url), "utf8");
   assert.match(source, /productFormErrorMessage\(error, "variant_delete"\)/);
   assert.equal(source.match(/productFormErrorMessage\(error, "variant_save"\)/g)?.length, 2);
-  assert.match(source, /productFormErrorMessage\(err, "variant_mode_switch"\)/);
+  assert.match(source, /productFormErrorMessage\(payload, "variant_mode_switch"\)/);
+});
+
+test("Pasar a variantes goes through the atomic panel endpoint", async () => {
+  const source = await readFile(new URL("../src/pages/panel/productos/ProductForm.tsx", import.meta.url), "utf8");
+  const handler = source.slice(source.indexOf("const handlePasarAVariantes"), source.indexOf("if (loadingProducto)"));
+  assert.match(handler, /`\/api\/panel\/productos\/\$\{encodeURIComponent\(productoId\)\}\/modo-variantes`/);
+  assert.match(handler, /method: "POST"/);
+  assert.doesNotMatch(handler, /supabase\s*\.from\(/);
 });
