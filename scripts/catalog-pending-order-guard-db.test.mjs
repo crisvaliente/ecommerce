@@ -386,3 +386,38 @@ test("only the service role can switch a product to variants", async () => {
     assert.deepEqual(await productState(fixture), { usa_variantes: false, stock: 10, variants: [] });
   });
 });
+
+async function simpleProduct(fixture) {
+  const { data, error } = await service.from("producto").select("estado, stock").eq("id", fixture.simpleId).single();
+  assert.ifError(error);
+  return data;
+}
+
+test("a consolidated sale keeps a published simple product published", async () => {
+  await withFixture(async (fixture) => {
+    const pedidoId = await createOrder(fixture, { productoId: fixture.simpleId });
+    const consolidation = await consolidateApprovedPayment(fixture, pedidoId);
+    assert.ifError(consolidation.error);
+    assert.equal(consolidation.data[0].ok, true);
+    assert.deepEqual(await simpleProduct(fixture), { estado: "published", stock: 9 });
+  });
+});
+
+test("stock-only updates keep a product published while content edits return it to draft", async () => {
+  await withFixture(async (fixture) => {
+    const update = async (values) => {
+      const { error } = await service.from("producto").update(values).eq("id", fixture.simpleId);
+      assert.ifError(error);
+      return simpleProduct(fixture);
+    };
+    assert.deepEqual(await update({ stock: 7 }), { estado: "published", stock: 7 });
+    assert.deepEqual(await update({ precio: 150 }), { estado: "draft", stock: 7 });
+    assert.deepEqual(await update({ estado: "published", stock: 5 }), { estado: "published", stock: 5 });
+    assert.deepEqual(await update({ stock: 4, nombre: "Simple edited" }), { estado: "draft", stock: 4 });
+
+    await update({ estado: "published" });
+    const { error } = await switchToVariants(fixture);
+    assert.ifError(error);
+    assert.deepEqual(await simpleProduct(fixture), { estado: "draft", stock: 0 });
+  });
+});
