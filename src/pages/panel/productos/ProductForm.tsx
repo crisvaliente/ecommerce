@@ -5,6 +5,7 @@ import Button from "../../../components/ui/Button";
 import Input from "../../../components/ui/Input";
 import { supabase } from "../../../lib/supabaseClient";
 import { useAuth } from "../../../context/AuthContext";
+import { productFormErrorMessage } from "../../../lib/productFormErrors";
 import {
   uploadProductoImagen,
   createSignedUrl,
@@ -994,7 +995,7 @@ const handleDraft = async () => {
 
       if (error) {
         console.error("Error actualizando variante:", error);
-        showError("No se pudo guardar la variante.");
+        showError(productFormErrorMessage(error, "variant_save"));
         setVarSaving(false);
         return;
       }
@@ -1003,7 +1004,7 @@ const handleDraft = async () => {
 
       if (error) {
         console.error("Error creando variante:", error);
-        showError("No se pudo crear la variante.");
+        showError(productFormErrorMessage(error, "variant_save"));
         setVarSaving(false);
         return;
       }
@@ -1059,7 +1060,7 @@ const handleDraft = async () => {
 
     if (error) {
       console.error("Error eliminando variante:", error);
-      showError("No se pudo eliminar la variante.");
+      showError(productFormErrorMessage(error, "variant_delete"));
       return;
     }
 
@@ -1156,15 +1157,7 @@ const handleDraft = async () => {
       showSuccess("Modo variantes activado correctamente.");
     } catch (err: unknown) {
       console.error("Error pasando a variantes (B1.4):", err);
-
-      const message =
-        err instanceof Error
-          ? err.message
-          : typeof err === "string"
-          ? err
-          : "No se pudo activar el modo variantes.";
-
-      showError(message);
+      showError(productFormErrorMessage(err, "variant_mode_switch"));
     } finally {
       setSwitchingToVariantes(false);
     }
