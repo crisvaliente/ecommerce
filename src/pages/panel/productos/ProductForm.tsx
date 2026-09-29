@@ -7,6 +7,12 @@ import { supabase } from "../../../lib/supabaseClient";
 import { useAuth } from "../../../context/AuthContext";
 import { productFormErrorMessage } from "../../../lib/productFormErrors";
 import {
+  INVALID_STOCK_MESSAGE,
+  STOCK_CONFLICT_MESSAGE,
+  parseStockInput,
+  planStockWrite,
+} from "../../../lib/productStockWrite";
+import {
   uploadProductoImagen,
   createSignedUrl,
   deleteProductoImagen,
@@ -123,6 +129,8 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
   // ✅ flags stock real
   const [usaVariantes, setUsaVariantes] = useState(false);
   const [stockTotal, setStockTotal] = useState<number | null>(null);
+  // Simple stock as read from the database; stock writes compare against it.
+  const [loadedStock, setLoadedStock] = useState<number | null>(null);
 
   const [form, setForm] = useState<ProductoFormState>({
     nombre: "",
@@ -162,7 +170,7 @@ const ProductForm: React.FC<Props> = ({ productoId }) => {
       },
       {
         label: usaVariantes ? "Stock por talles configurado" : "Stock general configurado",
-        done: usaVariantes || (Number.isFinite(Number(form.stock)) && Number(form.stock) >= 0),
+        done: usaVariantes || parseStockInput(form.stock) !== null,
       },
       {
         label: "Categoria o descripcion opcional revisada",
@@ -690,6 +698,7 @@ const handleUploadImagen = async (files: File | FileList | File[]) => {
       const pc0 = data.producto_categoria?.[0] ?? null;
       const cat = pc0 ? pickCategoria(pc0.categoria) : null;
 
+      setLoadedStock(data.stock);
       setForm({
         nombre: data.nombre ?? "",
         descripcion: data.descripcion ?? "",
@@ -762,8 +771,8 @@ const handleUploadImagen = async (files: File | FileList | File[]) => {
       throw new Error("Ingresá un precio válido mayor a 0.");
     }
 
-    if (!usaVariantes && (!Number.isFinite(Number(form.stock)) || Number(form.stock) < 0)) {
-      throw new Error("Ingresá un stock válido igual o mayor a 0.");
+    if (!usaVariantes && parseStockInput(form.stock) === null) {
+      throw new Error(INVALID_STOCK_MESSAGE);
     }
 
     const estadoToSave = overrideEstado ?? form.estado;
@@ -781,26 +790,30 @@ const handleUploadImagen = async (files: File | FileList | File[]) => {
       estado: estadoToSave,
     };
 
-    const payload = shouldWriteLegacyStock
-      ? { ...basePayload, stock: Number(form.stock) }
-      : basePayload;
-
 if (productoId) {
-  const { data, error } = await supabase
+  const stockWrite =
+    shouldWriteLegacyStock && loadedStock !== null ? planStockWrite(loadedStock, form.stock) : null;
+  const updateQuery = supabase
     .from("producto")
-    .update(payload)
+    .update(stockWrite ? { ...basePayload, stock: stockWrite.stock } : basePayload)
     .eq("id", productoId)
-    .eq("empresa_id", empresaId)
+    .eq("empresa_id", empresaId);
+  const { data, error } = await (stockWrite
+    ? updateQuery.eq("stock", stockWrite.expectedStock)
+    : updateQuery
+  )
     .select("id, estado, updated_at")
-    .single();
+    .maybeSingle();
 
   if (error) {
     console.error("Error actualizando producto:", error);
     throw error;
   }
   if (!data?.id) {
-    throw new Error("UPDATE no devolvió fila (0 rows?)");
+    // With a stock write, no row means a sale changed the stock after it was read.
+    throw new Error(stockWrite ? STOCK_CONFLICT_MESSAGE : "UPDATE no devolvió fila (0 rows?)");
   }
+  if (stockWrite) setLoadedStock(stockWrite.stock);
 
   // ✅ DB manda (tu trigger puede forzar draft)
   const estadoDB = toProductoEstado(data.estado);
@@ -818,7 +831,7 @@ if (productoId) {
 
     const { data, error } = await supabase
       .from("producto")
-      .insert(payload)
+      .insert(shouldWriteLegacyStock ? { ...basePayload, stock: parseStockInput(form.stock) } : basePayload)
       .select("id, estado")
       .single<{ id: string; estado: string | null }>();
 
@@ -976,22 +989,41 @@ const handleDraft = async () => {
       return;
     }
 
+    // A new variant may leave stock blank (0); an edit must state it, or a blank field would zero it.
+    const formStock =
+      !varEditingId && String(varForm.stock).trim() === "" ? 0 : parseStockInput(varForm.stock);
+    if (formStock === null) {
+      showError(INVALID_STOCK_MESSAGE);
+      return;
+    }
+
     setVarSaving(true);
 
-    const payload = {
+    const basePayload = {
       empresa_id: empresaId,
       producto_id: productoId,
       talle: varForm.nombre.trim(),
-      stock: Number(varForm.stock) || 0,
       activo: !!varForm.activo,
     };
 
     if (varEditingId) {
-      const { error } = await supabase
+      const original = variantes.find((v) => v.id === varEditingId);
+      if (!original) {
+        showError(STOCK_CONFLICT_MESSAGE);
+        await fetchVariantes();
+        setVarSaving(false);
+        return;
+      }
+      const stockWrite = planStockWrite(original.stock, formStock);
+      const updateQuery = supabase
         .from("producto_variante")
-        .update(payload)
+        .update(stockWrite ? { ...basePayload, stock: stockWrite.stock } : basePayload)
         .eq("id", varEditingId)
         .eq("empresa_id", empresaId);
+      const { data, error } = await (stockWrite
+        ? updateQuery.eq("stock", stockWrite.expectedStock)
+        : updateQuery
+      ).select("id");
 
       if (error) {
         console.error("Error actualizando variante:", error);
@@ -999,8 +1031,17 @@ const handleDraft = async () => {
         setVarSaving(false);
         return;
       }
+      // With a stock write, no row means a sale changed the stock after it was read.
+      if (stockWrite && (data ?? []).length === 0) {
+        showError(STOCK_CONFLICT_MESSAGE);
+        await fetchVariantes();
+        setVarSaving(false);
+        return;
+      }
     } else {
-      const { error } = await supabase.from("producto_variante").insert(payload);
+      const { error } = await supabase
+        .from("producto_variante")
+        .insert({ ...basePayload, stock: formStock });
 
       if (error) {
         console.error("Error creando variante:", error);

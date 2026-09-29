@@ -421,3 +421,41 @@ test("stock-only updates keep a product published while content edits return it 
     assert.deepEqual(await simpleProduct(fixture), { estado: "draft", stock: 0 });
   });
 });
+
+async function stockOf(table, id) {
+  const { data, error } = await service.from(table).select("stock").eq("id", id).single();
+  assert.ifError(error);
+  return data.stock;
+}
+
+test("a panel stock write based on a read taken before a sale never overwrites the sale", async (t) => {
+  for (const [table, idKey, order] of [
+    ["producto", "simpleId", (fixture) => ({ productoId: fixture.simpleId })],
+    ["producto_variante", "variantId", (fixture) => ({ productoId: fixture.variantProductId, varianteId: fixture.variantId })],
+  ]) {
+    await t.test(table, async () => {
+      await withFixture(async (fixture) => {
+        const id = fixture[idKey];
+        const admin = authenticatedClient(fixture.adminAuthId);
+        const readStock = await stockOf(table, id);
+        const consolidation = await consolidateApprovedPayment(fixture, await createOrder(fixture, order(fixture)));
+        assert.equal(consolidation.data?.[0]?.ok, true);
+        assert.equal(await stockOf(table, id), readStock - 1);
+
+        const stale = await admin.from(table).update({ stock: readStock + 2 }).eq("id", id).eq("stock", readStock).select("id");
+        assert.ifError(stale.error);
+        assert.equal(stale.data.length, 0, "a write against the stock read before the sale is rejected");
+        assert.equal(await stockOf(table, id), readStock - 1);
+
+        const current = await admin.from(table).update({ stock: readStock + 2 }).eq("id", id).eq("stock", readStock - 1).select("id");
+        assert.ifError(current.error);
+        assert.equal(current.data.length, 1);
+        assert.equal(await stockOf(table, id), readStock + 2);
+
+        const overwrite = await admin.from(table).update({ stock: readStock }).eq("id", id).select("id");
+        assert.ifError(overwrite.error);
+        assert.equal(await stockOf(table, id), readStock, "the old absolute write overwrites whatever is stored");
+      });
+    });
+  }
+});
