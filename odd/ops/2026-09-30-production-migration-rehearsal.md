@@ -41,3 +41,9 @@ Rollback: migrations are forward-only; before step 2 take a Supabase backup (das
 - Decide whether the legacy trigger `trg_producto_categoria_misma_empresa` stays (redundant with Gate 3's composite FK).
 - Separate slice: migration re-aligning `crear_pedido_con_items` with the repo (`variante_sin_stock`).
 - Local dev DB now mirrors production drift (e.g. `producto_categoria` structure).
+
+## Pre-push status (2026-09-30)
+
+- Backups: the project has **no backups and no PITR** (`supabase backups list`: 0 backups, `pitr_enabled: false`). A manual backup was taken outside the repository: `~/backups/raeyz/2026-09-30-pre-gate3/` (mode 700; contains customer data, never commit) with `roles.sql`, `schema.sql`, `data.sql` (`supabase db dump`), `schema_migrations_versions.txt` (67 versions; the dump excludes the ledger), the 3 Storage files downloaded through the Storage API (sizes verified) and `SHA256SUMS`. Row counts in `data.sql` match production for every checked table (orders 31, order items 31, payment attempts 26, profiles 6, Auth users 10, identities 11, products 7, variants 5, storage objects 3, webhook receipts 6). The dump was not test-restored.
+- Read-only pre-check: ledger 67 ending at `20260903130000`, Gate 3 preflight `preflight_ok`, 0 unexpired pending orders, 0 other active sessions, `ip_sel_owner` present.
+- `supabase db push --linked --project-ref tdzlbwjcpdwlidniyhdd --dry-run`: would push exactly `20260913120000`, `20260914120000`, `20260914165851`, `20260928190000`, `20260928210000`, `20260929120000`, `20260929130000`; no seeds or roles. Ledger unchanged afterwards.
