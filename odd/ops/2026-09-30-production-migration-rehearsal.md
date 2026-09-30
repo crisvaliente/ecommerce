@@ -47,3 +47,14 @@ Rollback: migrations are forward-only; before step 2 take a Supabase backup (das
 - Backups: the project has **no backups and no PITR** (`supabase backups list`: 0 backups, `pitr_enabled: false`). A manual backup was taken outside the repository: `~/backups/raeyz/2026-09-30-pre-gate3/` (mode 700; contains customer data, never commit) with `roles.sql`, `schema.sql`, `data.sql` (`supabase db dump`), `schema_migrations_versions.txt` (67 versions; the dump excludes the ledger), the 3 Storage files downloaded through the Storage API (sizes verified) and `SHA256SUMS`. Row counts in `data.sql` match production for every checked table (orders 31, order items 31, payment attempts 26, profiles 6, Auth users 10, identities 11, products 7, variants 5, storage objects 3, webhook receipts 6). The dump was not test-restored.
 - Read-only pre-check: ledger 67 ending at `20260903130000`, Gate 3 preflight `preflight_ok`, 0 unexpired pending orders, 0 other active sessions, `ip_sel_owner` present.
 - `supabase db push --linked --project-ref tdzlbwjcpdwlidniyhdd --dry-run`: would push exactly `20260913120000`, `20260914120000`, `20260914165851`, `20260928190000`, `20260928210000`, `20260929120000`, `20260929130000`; no seeds or roles. Ledger unchanged afterwards.
+
+## Production push (2026-09-30)
+
+Authorized by the user ("adelante"). From commit `d5dedf9`: `supabase db push --linked --project-ref tdzlbwjcpdwlidniyhdd --yes` applied the 7 migrations in order without errors.
+
+Read-only post-check:
+- Ledger 74, last `20260929130000`; `ip_sel_owner` gone; exactly 20 catalog policies, all Gate 3; `usuario` has only `usuario_select_self`; the four Gate 3 constraints exist and are validated; the four pending-order/variant-mode triggers exist; `pasar_producto_a_variantes` executable only by `service_role`; `is_in_pending_order` not executable by `anon`/`authenticated`; `producto_auto_draft_on_update` equals the rehearsal version; `anon` cannot read `producto`; bucket private.
+- Full schema fingerprint vs the local rehearsal database: no difference in function code, policies, triggers, columns, RLS, views, storage policies, routine grants, indexes, constraint names or table grants (except local-image `REFERENCES`/`TRIGGER`/`TRUNCATE` defaults).
+- Data unchanged vs the backup: orders 31 (2 paid), order items 31, payment attempts 26, profiles 6, Auth users 10, companies 9, products 7 (2 published), variants 5, categories 2, images 3, Storage objects 3.
+
+Next: deploy this branch, then smoke (panel login, products, categories, checkout + consolidation on a test product).
