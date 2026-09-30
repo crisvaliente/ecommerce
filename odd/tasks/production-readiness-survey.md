@@ -98,3 +98,5 @@ Read-only check before deleting: the 4 files exist in `producto-imagenes` (9 fil
 Follow-up (user chose "Storage API"): the service role key was obtained with `supabase projects api-keys --project-ref tdzlbwjcpdwlidniyhdd` into a shell variable only (never printed or stored) and used for one `DELETE /storage/v1/object/producto-imagenes` with the 4 exact paths: HTTP 200, 4 objects deleted. Read-only re-check: none of the 4 present, bucket 9 → 5 files, no active image row without its file.
 
 Two older files with no `imagen_producto` row, not part of the authorized list and left untouched: `2e524336-6e35-41df-aa60-6e4b77ec538c/f854c29b-894f-4672-a58a-d4c0301004e1.jpeg` and `…/917e2334-efdb-44a3-a3c5-def7d9d77c75.jpeg` (2026-01-14, 145 KB each). Their prefix is the id of a deleted dssd product.
+
+The user then authorized deleting those two files. Read-only pre-check: both present, no reference, product `2e524336-…` gone. Same Storage API call (key in a shell variable only): HTTP 200, 2 deleted. Final read-only state: bucket `producto-imagenes` 3 files, 0 unreferenced files, 0 active image rows without a file.
