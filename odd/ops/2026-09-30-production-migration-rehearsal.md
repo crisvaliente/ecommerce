@@ -58,3 +58,13 @@ Read-only post-check:
 - Data unchanged vs the backup: orders 31 (2 paid), order items 31, payment attempts 26, profiles 6, Auth users 10, companies 9, products 7 (2 published), variants 5, categories 2, images 3, Storage objects 3.
 
 Next: deploy this branch, then smoke (panel login, products, categories, checkout + consolidation on a test product).
+
+## Profile backfill (2026-10-06)
+
+Gate 3 left 4 Auth users created before the Auth trigger without a `usuario` profile (they could not buy or use the panel). Migration `20260930120000_backfill_missing_usuario_profiles.sql` (commit `1981f2c`) creates the trigger's profile for them and fails closed on any email/id conflict.
+
+- On resume the production project was **paused** (`INACTIVE`, free-plan inactivity pause; storefront, panel, auth and the Mercado Pago webhook were down). The user restored it from the Dashboard; status went `COMING_UP` → `RESTORING` → `ACTIVE_HEALTHY` in about 7 minutes. Read-only check afterwards: data identical to 2026-09-30 (ledger 74, profiles 6, Auth users 10, orders 31 with 2 paid, payment attempts 26, Storage 3).
+- Dry run on production (migration body ending in `rollback`): would create exactly the 4 profiles (`cliente`, no company, `onboarding = true`, email equal to Auth) and leave no Auth user without profile; production unchanged afterwards.
+- Authorized `supabase db push --linked --project-ref tdzlbwjcpdwlidniyhdd --yes`: applied only `20260930120000`. Post-check: ledger 75, profiles 10, 0 Auth users without profile, orders unchanged.
+
+Launch blocker recorded: the free plan pauses the project after inactivity; production needs a paid plan (also adds daily backups) or an accepted keep-alive.
