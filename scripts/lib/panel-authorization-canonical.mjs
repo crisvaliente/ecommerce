@@ -9,6 +9,7 @@ const failures = {
   kind: ["ERR_UNKNOWN_KIND", "Unknown kind."],
   variant: ["ERR_UNKNOWN_VARIANT", "Unknown relation variant."],
   invalidScalar: ["ERR_INVALID_SCALAR", "Expected a valid relation scalar."],
+  invalidColumns: ["ERR_INVALID_COLUMNS", "Expected a dense columns array."],
 };
 const relationVariants = new Set([
   "table", "partitioned_table", "foreign_table", "sequence", "view", "materialized_view",
@@ -35,6 +36,38 @@ function snapshotRecord(value) {
     descriptors.set(key, Reflect.getOwnPropertyDescriptor(value, key));
   }
   return { prototype, keys, descriptors };
+}
+
+function snapshotArray(value) {
+  if (utilTypes.isProxy(value)) reject(failures.proxy);
+  if (!Array.isArray(value)) reject(failures.invalidColumns);
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Array.prototype && prototype !== null) reject(failures.invalidColumns);
+
+  const keys = Reflect.ownKeys(value);
+  const descriptors = new Map();
+  for (const key of keys) descriptors.set(key, Reflect.getOwnPropertyDescriptor(value, key));
+  for (const key of keys) {
+    const descriptor = descriptors.get(key);
+    if (key === "length") {
+      if (descriptor.enumerable || !("value" in descriptor)) reject(failures.field);
+    } else if (typeof key === "symbol" || !descriptor.enumerable || !("value" in descriptor)) {
+      reject(failures.field);
+    }
+  }
+  for (const key of keys) {
+    if (key !== "length" && !/^(0|[1-9]\d*)$/.test(key)) reject(failures.unknownField);
+  }
+  const length = descriptors.get("length")?.value;
+  if (keys.length !== length + 1) reject(failures.invalidColumns);
+
+  const values = [];
+  for (let index = 0; index < length; index += 1) {
+    const descriptor = descriptors.get(String(index));
+    if (!descriptor) reject(failures.invalidColumns);
+    values.push(descriptor.value);
+  }
+  return values;
 }
 
 function validateSnapshot(snapshot, allowed, required, rejectOid = false) {
@@ -66,8 +99,10 @@ export function canonicalizePanelAuthorization(input) {
 
   const relation = snapshotRecord(relationValue);
   validateSnapshot(relation, new Set([
-    "variant", "content", "schema", "name", "owner", "rlsEnabled", "rlsForced",
-  ]), ["variant", "content", "schema", "name", "owner", "rlsEnabled", "rlsForced"], true);
+    "variant", "content", "schema", "name", "owner", "rlsEnabled", "rlsForced", "columns",
+  ]), [
+    "variant", "content", "schema", "name", "owner", "rlsEnabled", "rlsForced", "columns",
+  ], true);
   const variant = relation.descriptors.get("variant").value;
   if (!relationVariants.has(variant)) reject(failures.variant);
 
@@ -83,5 +118,6 @@ export function canonicalizePanelAuthorization(input) {
     || typeof rlsEnabled !== "boolean"
     || typeof rlsForced !== "boolean"
   ) reject(failures.invalidScalar);
-  return { kind: "relation", variant, schema, name, owner, rlsEnabled, rlsForced };
+  const columns = snapshotArray(relation.descriptors.get("columns").value);
+  return { kind: "relation", variant, schema, name, owner, rlsEnabled, rlsForced, columns };
 }

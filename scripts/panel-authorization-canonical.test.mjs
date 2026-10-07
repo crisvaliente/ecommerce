@@ -12,12 +12,18 @@ const scalarMetadata = {
   rlsEnabled: true,
   rlsForced: false,
 };
-const validRelation = (content = { ignored: true }, variant = "table", scalars = scalarMetadata) => ({
+const columnMetadata = [
+  { name: "zeta", type: " text ", nullable: false, defaultExpression: "''::text" },
+  { name: "Alpha", type: "uuid", nullable: true, defaultExpression: null },
+];
+const validRelation = (
+  content = { ignored: true }, variant = "table", scalars = scalarMetadata, columns = columnMetadata,
+) => ({
   kind: "relation",
-  relation: { variant, content, ...scalars },
+  relation: { variant, content, ...scalars, columns },
 });
-const expectedRelation = (variant = "table", scalars = scalarMetadata) => ({
-  kind: "relation", variant, ...scalars,
+const expectedRelation = (variant = "table", scalars = scalarMetadata, columns = columnMetadata) => ({
+  kind: "relation", variant, ...scalars, columns,
 });
 
 function captureFailure(input) {
@@ -47,6 +53,9 @@ const failures = {
   kind: ["ERR_UNKNOWN_KIND", "Unknown kind."],
   variant: ["ERR_UNKNOWN_VARIANT", "Unknown relation variant."],
   invalidScalar: ["ERR_INVALID_SCALAR", "Expected a valid relation scalar."],
+  invalidColumns: ["ERR_INVALID_COLUMNS", "Expected a dense columns array."],
+  invalidColumn: ["ERR_INVALID_COLUMN", "Expected a valid column."],
+  duplicateColumn: ["ERR_DUPLICATE_COLUMN", "Duplicate column name."],
 };
 
 function hostileProxy(target = {}) {
@@ -102,7 +111,7 @@ test("accepts enriched relation metadata and retains exact scalars", () => {
 });
 test("accepts null-prototype envelope and relation records", () => {
   const relation = Object.assign(Object.create(null), {
-    variant: "table", content: null, ...scalarMetadata,
+    variant: "table", content: null, ...scalarMetadata, columns: columnMetadata,
   });
   const input = Object.assign(Object.create(null), { kind: "relation", relation });
   assert.deepEqual(canonicalizePanelAuthorization(input), expectedRelation());
@@ -112,16 +121,18 @@ test("retains whitespace, Unicode, control characters, case, and long strings ex
     schema: " \t ", name: `MiXeD${CONTROL}\n`, owner: "名".repeat(8192),
     rlsEnabled: false, rlsForced: true,
   };
-  assert.deepEqual(canonicalizePanelAuthorization(validRelation(null, "view", scalars)), {
-    kind: "relation", variant: "view", ...scalars,
-  });
+  assert.deepEqual(
+    canonicalizePanelAuthorization(validRelation(null, "view", scalars)),
+    expectedRelation("view", scalars),
+  );
 });
 for (const [rlsEnabled, rlsForced] of [[false, false], [false, true], [true, false], [true, true]]) {
   test(`retains RLS boolean combination ${rlsEnabled}/${rlsForced}`, () => {
     const scalars = { ...scalarMetadata, rlsEnabled, rlsForced };
-    assert.deepEqual(canonicalizePanelAuthorization(validRelation(null, "sequence", scalars)), {
-      kind: "relation", variant: "sequence", ...scalars,
-    });
+    assert.deepEqual(
+      canonicalizePanelAuthorization(validRelation(null, "sequence", scalars)),
+      expectedRelation("sequence", scalars),
+    );
   });
 }
 test("returns a new plain record without content, extra keys, or input mutation", () => {
@@ -129,7 +140,7 @@ test("returns a new plain record without content, extra keys, or input mutation"
   const originalRelation = { ...input.relation };
   const result = canonicalizePanelAuthorization(input);
   assert.deepEqual(Reflect.ownKeys(result), [
-    "kind", "variant", "schema", "name", "owner", "rlsEnabled", "rlsForced",
+    "kind", "variant", "schema", "name", "owner", "rlsEnabled", "rlsForced", "columns",
   ]);
   assert.deepEqual(input, { kind: "relation", relation: originalRelation });
   assert.equal(Object.getPrototypeOf(result), Object.prototype);
@@ -181,7 +192,7 @@ test("snapshots accepted envelope and relation descriptors exactly once", () => 
   const input = validRelation();
   const observed = observeDescriptors(input, [input, input.relation]);
   assertSnapshot(observed, [[input, ["kind", "relation"]], [input.relation, [
-    "variant", "content", "schema", "name", "owner", "rlsEnabled", "rlsForced",
+    "variant", "content", "schema", "name", "owner", "rlsEnabled", "rlsForced", "columns",
   ]]]);
   assert.equal(observed.error, undefined);
 });
@@ -264,6 +275,68 @@ for (const [name, input] of [
   ["missing relation variant", { kind: "relation", relation: { content: null } }],
   ["missing relation content", { kind: "relation", relation: { variant: "table" } }],
 ]) test(`rejects missing field: ${name}`, () => assertFailure(input, ...failures.missingField));
+test("rejects missing required columns", () => {
+  const input = validRelation();
+  delete input.relation.columns;
+  assertFailure(input, ...failures.missingField);
+});
+for (const [name, columns] of [
+  ["object", {}], ["null", null], ["string", "columns"],
+]) test(`rejects non-array columns: ${name}`, () => {
+  assertFailure(validRelation(null, "table", scalarMetadata, columns), ...failures.invalidColumns);
+});
+for (const [name, columns] of [
+  ["start", new Array(1)],
+  ["middle", [columnMetadata[0], , columnMetadata[1]]],
+  ["end", Object.assign([columnMetadata[0]], { length: 2 })],
+  ["hostile maximum length", Object.assign([], { length: 0xffffffff })],
+]) test(`rejects sparse columns hole at ${name}`, () => {
+  assertFailure(validRelation(null, "table", scalarMetadata, columns), ...failures.invalidColumns);
+});
+test("rejects inherited array index without invoking it", () => {
+  const prior = Object.getOwnPropertyDescriptor(Array.prototype, "0");
+  let getterCalls = 0;
+  let error;
+  try {
+    Object.defineProperty(Array.prototype, "0", {
+      configurable: true, get() { getterCalls += 1; return columnMetadata[0]; },
+    });
+    error = captureFailure(validRelation(null, "table", scalarMetadata, new Array(1)));
+  } finally {
+    if (prior) Object.defineProperty(Array.prototype, "0", prior);
+    else delete Array.prototype[0];
+  }
+  assert.equal(getterCalls, 0);
+  assert.equal(error?.code, failures.invalidColumns[0]);
+});
+test("rejects custom array prototype without invoking hooks", () => {
+  let getterCalls = 0;
+  const prototype = Object.defineProperty({}, Symbol.iterator, {
+    get() { getterCalls += 1; throw new Error(SECRET); },
+  });
+  const columns = Object.setPrototypeOf([...columnMetadata], prototype);
+  assertFailure(validRelation(null, "table", scalarMetadata, columns), ...failures.invalidColumns);
+  assert.equal(getterCalls, 0);
+});
+test("rejects columns Proxy before reflective traps", () => {
+  const hostile = hostileProxy([...columnMetadata]);
+  assertFailure(validRelation(null, "table", scalarMetadata, hostile.value), ...failures.proxy);
+  for (const trap of ["get", "ownKeys", "getPrototypeOf", "getOwnPropertyDescriptor"]) {
+    assert.equal(hostile.counts[trap], 0);
+  }
+});
+for (const [name, build, failure] of [
+  ["extra property", () => Object.assign([...columnMetadata], { extra: SECRET }), failures.unknownField],
+  ["symbol property", () => Object.assign([...columnMetadata], { [Symbol(SECRET)]: CONTROL }), failures.field],
+  ["non-enumerable index", () => Object.defineProperty([...columnMetadata], "0", {
+    enumerable: false, value: columnMetadata[0],
+  }), failures.field],
+  ["accessor index", () => Object.defineProperty([...columnMetadata], "0", {
+    enumerable: true, get() { throw new Error(SECRET); },
+  }), failures.field],
+]) test(`rejects invalid columns field: ${name}`, () => {
+  assertFailure(validRelation(null, "table", scalarMetadata, build()), ...failure);
+});
 for (const field of ["schema", "name", "owner", "rlsEnabled", "rlsForced"]) {
   test(`rejects missing required scalar: ${field}`, () => {
     const input = validRelation();
