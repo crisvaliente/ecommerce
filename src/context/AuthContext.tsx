@@ -21,9 +21,17 @@ export interface CustomUser {
   empresa_id: string | null;
 }
 
+/**
+ * Resultado de la última carga. Distingue lo que `dbUser === null` no puede:
+ * sin sesión (anonymous), sesión sin perfil (missing) y fallo de lectura (error).
+ */
+export type ProfileStatus = "loading" | "anonymous" | "ready" | "missing" | "error";
+
 interface AuthContextType {
   sessionUser: User | null;
   dbUser: CustomUser | null;
+  profileStatus: ProfileStatus;
+  /** Equivale a `profileStatus === "loading"`. */
   loading: boolean;
   refresh: () => Promise<void>;
   signOut: () => Promise<void>;
@@ -31,21 +39,45 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+/** Espera antes del único reintento tras un error de lectura del perfil. */
+const PROFILE_RETRY_DELAY_MS = 500;
+
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+// Both readers turn a thrown call into a returned error, so load() and refresh() never reject.
+async function readSessionUser(): Promise<{ user: User | null; error: unknown }> {
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    return { user: data.session?.user ?? null, error };
+  } catch (error) {
+    return { user: null, error };
+  }
+}
+
+async function fetchOwnProfile(uid: string): Promise<{ data: CustomUser | null; error: unknown }> {
+  try {
+    const { data, error } = await supabase
+      .from("usuario")
+      .select("id, supabase_uid, nombre, correo, rol, empresa_id")
+      .eq("supabase_uid", uid)
+      .maybeSingle();
+    return { data: (data as CustomUser | null) ?? null, error };
+  } catch (error) {
+    return { data: null, error };
+  }
+}
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [loading, setLoading] = useState(true);
+  const [profileStatus, setProfileStatus] = useState<ProfileStatus>("loading");
   const [sessionUser, setSessionUser] = useState<User | null>(null);
   const [dbUser, setDbUser] = useState<CustomUser | null>(null);
 
-  // Anti-race en Strict Mode
-  const didInit = useRef(false);
-  const mountedRef = useRef(true);
-
-  useEffect(
-    () => () => {
-      mountedRef.current = false;
-    },
-    []
-  );
+  // Each effect setup owns a distinct active lifetime.
+  const mountedRef = useRef(false);
+  const loadVersionRef = useRef(0);
+  const invalidateLoad = useCallback(() => {
+    ++loadVersionRef.current;
+  }, []);
 
   // ✅ safeSet estable
   const safeSet = useCallback(
@@ -55,105 +87,57 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     [mountedRef]
   );
 
-  /** ✅ ensureProfile estable (usada dentro de load) */
-  const ensureProfile = useCallback(
-    async (u: User): Promise<CustomUser | null> => {
-      const emailLower = u.email ? u.email.toLowerCase() : null;
-
-      // Nombre desde metadata (Google u otros providers)
-      const fullName =
-        (u.user_metadata &&
-          (u.user_metadata.full_name ||
-            u.user_metadata.name ||
-            u.user_metadata.user_name)) ||
-        null;
-
-      // ¿existe?
-      const { data: existing, error: exErr } = await supabase
-        .from("usuario")
-        .select("id, supabase_uid, nombre, correo, rol, empresa_id")
-        .eq("supabase_uid", u.id)
-        .maybeSingle();
-
-      if (exErr) {
-        console.debug("[auth] ensureProfile select error:", exErr);
-        return null;
-      }
-      if (existing) return existing as CustomUser;
-
-      // crear
-      const { data: inserted, error: insErr } = await supabase
-        .from("usuario")
-        .insert({
-          supabase_uid: u.id,
-          correo: emailLower,
-          nombre: fullName,
-          rol: "cliente",
-          onboarding: true,
-          empresa_id: null,
-        })
-        .select("id, supabase_uid, nombre, correo, rol, empresa_id")
-        .single();
-
-      if (insErr) {
-        console.debug("[auth] ensureProfile insert error:", insErr);
-        const { data: fallback } = await supabase
-          .from("usuario")
-          .select("id, supabase_uid, nombre, correo, rol, empresa_id")
-          .eq("supabase_uid", u.id)
-          .maybeSingle();
-        return (fallback as CustomUser) ?? null;
-      }
-      return inserted as CustomUser;
-    },
-    []
-  );
-
   /** ✅ load estable (usada en effect y expuesta como refresh) */
   const load = useCallback(async () => {
-    safeSet(setLoading, true);
+    const loadVersion = ++loadVersionRef.current;
+    const isCurrentLoad = () =>
+      mountedRef.current && loadVersionRef.current === loadVersion;
+
+    safeSet(setProfileStatus, "loading");
 
     // 1) Sesión actual
-    const {
-      data: { session },
-      error: sErr,
-    } = await supabase.auth.getSession();
-    if (sErr) console.debug("[auth] getSession error:", sErr);
+    const { user: u, error: sErr } = await readSessionUser();
+    if (!isCurrentLoad()) return;
+    if (sErr) console.warn("[auth] getSession error:", sErr);
 
-    const u = session?.user ?? null;
     safeSet(setSessionUser, u);
 
     // 2) Invitado
     if (!u) {
       safeSet(setDbUser, null);
-      safeSet(setLoading, false);
+      safeSet(setProfileStatus, "anonymous");
       return;
     }
 
-    // 3) Buscar perfil por supabase_uid
-    const { data, error } = await supabase
-      .from("usuario")
-      .select("id, supabase_uid, nombre, correo, rol, empresa_id")
-      .eq("supabase_uid", u.id)
-      .maybeSingle();
+    // 3) Buscar perfil por supabase_uid. Lo crea el trigger on_auth_user_created
+    // (migración 20260914165851); el navegador no provisiona ni repara perfiles.
+    let { data, error } = await fetchOwnProfile(u.id);
+    if (!isCurrentLoad()) return;
 
-    if (error) console.debug("[auth] fetch usuario error:", error);
+    // 4) Un error de lectura (no un perfil inexistente) se reintenta una sola vez,
+    // tras una espera corta.
+    if (error) {
+      console.error("[auth] fetch usuario error:", error);
+      await wait(PROFILE_RETRY_DELAY_MS);
+      if (!isCurrentLoad()) return;
+      ({ data, error } = await fetchOwnProfile(u.id));
+      if (!isCurrentLoad()) return;
+      if (error) console.error("[auth] fetch usuario retry error:", error);
+    }
+    if (!error && !data) {
+      console.warn("[auth] usuario sin perfil para la sesión actual");
+    }
 
-    let profile: CustomUser | null = (data as CustomUser) ?? null;
-
-    // 4) Autocrear si falta
-    if (!profile) profile = await ensureProfile(u);
+    const profile: CustomUser | null = error ? null : data;
 
     // 5) Setear estado
     safeSet(setDbUser, profile);
-    safeSet(setLoading, false);
-  }, [ensureProfile, safeSet]);
+    safeSet(setProfileStatus, error ? "error" : profile ? "ready" : "missing");
+  }, [safeSet]);
 
   // ✅ Effect depende de load (función estable)
   useEffect(() => {
-    if (didInit.current) return;
-    didInit.current = true;
-
+    mountedRef.current = true;
     load();
 
     // Cambios de sesión
@@ -165,21 +149,32 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     );
 
     return () => {
+      invalidateLoad();
+      mountedRef.current = false;
       sub?.subscription.unsubscribe();
     };
-  }, [load, safeSet]);
+  }, [invalidateLoad, load, safeSet]);
 
   // ✅ signOut estable
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
+    ++loadVersionRef.current;
     safeSet(setSessionUser, null);
     safeSet(setDbUser, null);
+    safeSet(setProfileStatus, "anonymous");
+    await supabase.auth.signOut();
   }, [safeSet]);
 
   // ✅ Memo incluye load y signOut
   const value = useMemo<AuthContextType>(
-    () => ({ sessionUser, dbUser, loading, refresh: load, signOut }),
-    [sessionUser, dbUser, loading, load, signOut]
+    () => ({
+      sessionUser,
+      dbUser,
+      profileStatus,
+      loading: profileStatus === "loading",
+      refresh: load,
+      signOut,
+    }),
+    [sessionUser, dbUser, profileStatus, load, signOut]
   );
 
   return (

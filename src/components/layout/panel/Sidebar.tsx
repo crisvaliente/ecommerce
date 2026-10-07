@@ -3,49 +3,32 @@ import { useRouter } from "next/router";
 import React from "react";
 import { useAuth } from "../../../context/AuthContext";
 import { instanceConfig } from "../../../config/instance";
+import { decidePanelAdmission } from "../../../lib/panelRouteCapabilities";
 
 type PanelLink = {
   href: string;
   label: string;
-  allowedRoles?: string[];
 };
 
 const links: PanelLink[] = [
-  {
-    href: "/panel",
-    label: "Inicio",
-    allowedRoles: ["admin", "staff"],
-  },
-  {
-    href: "/panel/productos",
-    label: "Productos",
-    allowedRoles: ["admin", "staff"],
-  },
-  {
-    href: "/panel/categorias",
-    label: "Categorías",
-    allowedRoles: ["admin", "staff"],
-  },
-  {
-    href: "/panel/pedidos",
-    label: "Pedidos",
-    allowedRoles: ["admin", "staff"],
-  },
-  {
-    href: "/panel/payments",
-    label: "Pagos",
-    allowedRoles: ["admin"],
-  },
+  { href: "/panel", label: "Inicio" },
+  { href: "/panel/productos", label: "Productos" },
+  { href: "/panel/categorias", label: "Categorías" },
+  { href: "/panel/pedidos", label: "Pedidos" },
+  { href: "/panel/payments", label: "Pagos" },
 ];
 
 const PanelSidebar: React.FC = () => {
   const router = useRouter();
-  const { dbUser, sessionUser } = useAuth();
+  const { dbUser, sessionUser, loading } = useAuth();
 
-  const role = dbUser?.rol ?? "cliente";
-
-  const visibleLinks = links.filter(
-    (link) => !link.allowedRoles || link.allowedRoles.includes(role)
+  const visibleLinks = links.filter((link) =>
+    decidePanelAdmission({
+      loading,
+      pathname: link.href,
+      sessionUser,
+      dbUser,
+    }).kind === "allow"
   );
 
   const isActiveLink = (href: string) => {

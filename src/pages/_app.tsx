@@ -7,12 +7,13 @@ import Header from "../components/common/Header";
 import Footer from "../components/common/Footer";
 import { CartProvider } from "../components/ui/CartContext";
 import { AuthProvider } from "../context/AuthContext";
+import PanelRouteGate from "../components/layout/PanelRouteGate";
 import { instanceConfig } from "../config/instance";
 import "../styles/globals.css";
 
 function MyApp({ Component, pageProps }: AppProps) {
   const router = useRouter();
-  const isPanelRoute = router.pathname.startsWith("/panel");
+  const isPanelRoute = router.pathname === "/panel" || router.pathname.startsWith("/panel/");
 
   return (
     <>
@@ -28,7 +29,9 @@ function MyApp({ Component, pageProps }: AppProps) {
           {isPanelRoute ? (
           // 🌑 Mundo PANEL (sin header/footer públicos)
           <main className="min-h-screen">
-            <Component {...pageProps} />
+            <PanelRouteGate>
+              <Component {...pageProps} />
+            </PanelRouteGate>
           </main>
         ) : (
           // 🌕 Mundo PÚBLICO (con header + footer)

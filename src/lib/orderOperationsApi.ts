@@ -1,4 +1,3 @@
-type PanelRole = "admin" | "staff";
 type OperationalState =
   | "pendiente_pago"
   | "pagado"
@@ -15,15 +14,19 @@ type AuthorizationFailure = {
 
 type AuthorizationSuccess = {
   ok: true;
-  userId: string;
-  empresaId: string;
-  role: PanelRole;
-  supabaseAdmin: {
-    rpc: (name: string, params: Record<string, unknown>) => Promise<{
-      data: unknown;
-      error: unknown;
-    }>;
+  principal: {
+    authUserId: string;
+    profileId: string;
+    empresaId: string;
+    role: "admin" | "staff";
   };
+};
+
+type ServiceClient = {
+  rpc: (name: string, params: Record<string, unknown>) => PromiseLike<{
+    data: unknown;
+    error: unknown;
+  }>;
 };
 
 type RequestLike = {
@@ -51,9 +54,11 @@ type TransitionResult = {
 };
 
 type Dependencies = {
-  authorizePanelAccess: (
+  authorizePanelRequest: (
     req: RequestLike,
+    requiredCapability: "orders.operate" | "orders.cancel",
   ) => Promise<AuthorizationFailure | AuthorizationSuccess>;
+  createPanelServiceClient: () => ServiceClient;
   applyRateLimitHeaders: (res: ResponseLike, result: RateLimitResult) => void;
   checkRateLimit: (req: RequestLike, options: RateLimitOptions) => RateLimitResult;
   hasBearerAuthorization: (req: RequestLike) => boolean;
@@ -232,24 +237,24 @@ export function createOrderDetailHandler(dependencies: Dependencies) {
       return res.status(403).json({ error: originValidation.reason });
     }
 
-    const authorization = await dependencies.authorizePanelAccess(req);
+    const requiredCapability = payload.targetState === "cancelado"
+      ? "orders.cancel"
+      : "orders.operate";
+    const authorization = await dependencies.authorizePanelRequest(req, requiredCapability);
     if (authorization.ok === false) {
       return res.status(authorization.status).json({ error: authorization.error });
     }
 
-    if (payload.targetState === "cancelado" && authorization.role !== "admin") {
-      return res.status(403).json({ error: "forbidden" });
-    }
-
     try {
-      const { data, error } = await authorization.supabaseAdmin.rpc(
+      const serviceClient = dependencies.createPanelServiceClient();
+      const { data, error } = await serviceClient.rpc(
         "transicionar_pedido_operacional",
         {
           p_pedido_id: pedidoId,
-          p_empresa_id: authorization.empresaId,
+          p_empresa_id: authorization.principal.empresaId,
           p_expected_state: payload.expectedState,
           p_target_state: payload.targetState,
-          p_actor_id: authorization.userId,
+          p_actor_id: authorization.principal.authUserId,
           p_motivo: payload.motivo,
         },
       );

@@ -1,0 +1,70 @@
+# Production migration rehearsal (local, 2026-09-30)
+
+## Goal and scope
+
+User accepted ("arranca") rehearsing, on the local disposable Supabase, the migrations pending in production before any production change. The local database was rebuilt (local data lost; test data only). Production was only read (read-only transactions). Nothing was applied to production.
+
+## Steps
+
+1. `supabase db reset --local --version 20260903130000`: 67 migrations, the same ledger as production. Migration files up to that version are identical in `origin/master` and this branch.
+2. Schema fingerprint local vs production (policies, triggers, constraints, indexes, columns, grants, RLS, views, storage policies, function bodies normalized for whitespace/comments). Beyond formatting and local-image default privileges, production drift:
+   - `producto_categoria` with an `id` primary key and single-column FKs (the `a3` bridge migration used `create table if not exists` and was a no-op there);
+   - extra objects: trigger `trg_producto_categoria_misma_empresa` + function, trigger `categoria_set_updated_at`, policy `ip_sel_owner` on `imagen_producto`, 5 indexes, `authenticated` writes on `imagen_producto`, `anon` select on `producto_categoria`, explicit `service_role` grants;
+   - `crear_pedido_con_items` without the two `variante_sin_stock` checks.
+3. The drift was reproduced locally (`rehearsal/2026-09-30-local-prod-drift*.sql`, generated from production definitions; **local only**). Afterwards the fingerprint matched production except local-image `REFERENCES`/`TRIGGER`/`TRUNCATE` defaults for `anon`/`authenticated`. The Gate 3 preflight passed locally, as in production.
+4. `supabase migration up --local` (same ordering as `db push`): `20260913120000` applied; **Gate 3 failed its postflight with `gate3_post_catalog_policy_closure_invalid`** (fail-closed, fully rolled back) because production's `ip_sel_owner` policy is not one of Gate 3's 20 catalog policies. Left in place it would also widen image access through permissive OR.
+5. Fix: new migration `20260914120000_drop_legacy_imagen_producto_policy.sql` (`drop policy if exists ip_sel_owner`), ordered before Gate 3. Re-run: the remaining 6 migrations applied in order; ledger 74.
+6. Tests against this production-like database: unit 342/342; DB 77/79. The 2 failures are not caused by the migrations:
+   - "product category composite FK …": the cross-company reference is still denied, but production's legacy trigger `trg_producto_categoria_misma_empresa` raises `P0001` before the FK's `23503`.
+   - "private storage accepts only the exact tenant/product key grammar": assertions pass; the fixture cleanup deletes `storage.objects` with SQL, which the newer Storage (`storage.protect_delete`, also in production) forbids. Any freshly reset local database fails the same way.
+
+## Deploy-order check
+
+- `master`'s storefront reads the catalog server-side with `service_role` (not affected by Gate 3 grants).
+- `master`'s panel writes the catalog from the browser as `authenticated`; Gate 3 keeps that for same-company admin/staff.
+- `master`'s `AuthContext` tries a browser insert into `usuario` (revoked by Gate 3) and then re-reads; with Gate 3 the Auth trigger creates the profile, so the re-read finds it.
+- This branch needs the migrations (panel APIs, `pasar_producto_a_variantes`). Order: migrations first, then deploy the branch.
+
+## Proposed production plan (each step needs explicit authorization)
+
+1. Read-only pre-check: ledger still at `20260903130000`, Gate 3 preflight `preflight_ok`, no pending unexpired orders.
+2. `supabase db push` against the project (applies `20260913120000`, `20260914120000`, Gate 3, `20260928190000`, `20260928210000`, `20260929120000`, `20260929130000` in order; Gate 3 is atomic and fail-closed).
+3. Read-only post-check: ledger 74, Gate 3 policies present, `ip_sel_owner` gone, new triggers/functions present, `producto_auto_draft_on_update` updated.
+4. Deploy this branch's app.
+5. Smoke: panel login, product list/delete, categories, checkout + consolidation on a test product.
+
+Rollback: migrations are forward-only; before step 2 take a Supabase backup (dashboard) or confirm point-in-time recovery.
+
+## Follow-ups
+
+- Test fixtures must delete Storage objects through the Storage API.
+- Decide whether the legacy trigger `trg_producto_categoria_misma_empresa` stays (redundant with Gate 3's composite FK).
+- Separate slice: migration re-aligning `crear_pedido_con_items` with the repo (`variante_sin_stock`).
+- Local dev DB now mirrors production drift (e.g. `producto_categoria` structure).
+
+## Pre-push status (2026-09-30)
+
+- Backups: the project has **no backups and no PITR** (`supabase backups list`: 0 backups, `pitr_enabled: false`). A manual backup was taken outside the repository: `~/backups/raeyz/2026-09-30-pre-gate3/` (mode 700; contains customer data, never commit) with `roles.sql`, `schema.sql`, `data.sql` (`supabase db dump`), `schema_migrations_versions.txt` (67 versions; the dump excludes the ledger), the 3 Storage files downloaded through the Storage API (sizes verified) and `SHA256SUMS`. Row counts in `data.sql` match production for every checked table (orders 31, order items 31, payment attempts 26, profiles 6, Auth users 10, identities 11, products 7, variants 5, storage objects 3, webhook receipts 6). The dump was not test-restored.
+- Read-only pre-check: ledger 67 ending at `20260903130000`, Gate 3 preflight `preflight_ok`, 0 unexpired pending orders, 0 other active sessions, `ip_sel_owner` present.
+- `supabase db push --linked --project-ref tdzlbwjcpdwlidniyhdd --dry-run`: would push exactly `20260913120000`, `20260914120000`, `20260914165851`, `20260928190000`, `20260928210000`, `20260929120000`, `20260929130000`; no seeds or roles. Ledger unchanged afterwards.
+
+## Production push (2026-09-30)
+
+Authorized by the user ("adelante"). From commit `d5dedf9`: `supabase db push --linked --project-ref tdzlbwjcpdwlidniyhdd --yes` applied the 7 migrations in order without errors.
+
+Read-only post-check:
+- Ledger 74, last `20260929130000`; `ip_sel_owner` gone; exactly 20 catalog policies, all Gate 3; `usuario` has only `usuario_select_self`; the four Gate 3 constraints exist and are validated; the four pending-order/variant-mode triggers exist; `pasar_producto_a_variantes` executable only by `service_role`; `is_in_pending_order` not executable by `anon`/`authenticated`; `producto_auto_draft_on_update` equals the rehearsal version; `anon` cannot read `producto`; bucket private.
+- Full schema fingerprint vs the local rehearsal database: no difference in function code, policies, triggers, columns, RLS, views, storage policies, routine grants, indexes, constraint names or table grants (except local-image `REFERENCES`/`TRIGGER`/`TRUNCATE` defaults).
+- Data unchanged vs the backup: orders 31 (2 paid), order items 31, payment attempts 26, profiles 6, Auth users 10, companies 9, products 7 (2 published), variants 5, categories 2, images 3, Storage objects 3.
+
+Next: deploy this branch, then smoke (panel login, products, categories, checkout + consolidation on a test product).
+
+## Profile backfill (2026-10-06)
+
+Gate 3 left 4 Auth users created before the Auth trigger without a `usuario` profile (they could not buy or use the panel). Migration `20260930120000_backfill_missing_usuario_profiles.sql` (commit `1981f2c`) creates the trigger's profile for them and fails closed on any email/id conflict.
+
+- On resume the production project was **paused** (`INACTIVE`, free-plan inactivity pause; storefront, panel, auth and the Mercado Pago webhook were down). The user restored it from the Dashboard; status went `COMING_UP` → `RESTORING` → `ACTIVE_HEALTHY` in about 7 minutes. Read-only check afterwards: data identical to 2026-09-30 (ledger 74, profiles 6, Auth users 10, orders 31 with 2 paid, payment attempts 26, Storage 3).
+- Dry run on production (migration body ending in `rollback`): would create exactly the 4 profiles (`cliente`, no company, `onboarding = true`, email equal to Auth) and leave no Auth user without profile; production unchanged afterwards.
+- Authorized `supabase db push --linked --project-ref tdzlbwjcpdwlidniyhdd --yes`: applied only `20260930120000`. Post-check: ledger 75, profiles 10, 0 Auth users without profile, orders unchanged.
+
+Launch blocker recorded: the free plan pauses the project after inactivity; production needs a paid plan (also adds daily backups) or an accepted keep-alive.

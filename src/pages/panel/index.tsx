@@ -1,57 +1,12 @@
-import React, { useEffect } from "react";
-import { useRouter } from "next/router";
+import React from "react";
 import AdminLayout from "../../components/layout/AdminLayout";
 import { useAuth } from "../../context/AuthContext";
 
 const PanelHomePage: React.FC = () => {
-  const router = useRouter();
-  const { sessionUser, dbUser, loading } = useAuth();
-
-  useEffect(() => {
-    if (loading) return;
-
-    // 1) No logueado -> login
-    if (!sessionUser) {
-      router.replace("/auth/login"); // o tu ruta real de login
-      return;
-    }
-
-    // 2) Si no existe dbUser todavía (raro pero puede pasar por RLS o race) -> home
-    if (!dbUser) {
-      router.replace("/");
-      return;
-    }
-
-    // 3) No admin -> home
-    if (dbUser.rol !== "admin") {
-      router.replace("/");
-      return;
-    }
-
-    // 4) Admin sin empresa -> por ahora home (o una pantalla "pendiente asignación")
-    if (!dbUser.empresa_id) {
-      router.replace("/");
-      return;
-    }
-  }, [loading, sessionUser, dbUser, router]);
-
-  // Loader para evitar flash
-  if (loading) {
-    return (
-      <AdminLayout>
-        <div className="px-8 py-6 max-w-5xl">
-          <p className="text-sm text-slate-500">Cargando panel…</p>
-        </div>
-      </AdminLayout>
-    );
-  }
-
-  // Si no cumple, ya redirigimos; devolvemos null para no renderizar
-  if (!sessionUser || !dbUser || dbUser.rol !== "admin" || !dbUser.empresa_id) {
-    return null;
-  }
-
-  const empresaId = dbUser.empresa_id;
+  const { dbUser } = useAuth();
+  const empresaId = typeof dbUser?.empresa_id === "string" && dbUser.empresa_id.trim()
+    ? dbUser.empresa_id
+    : "—";
   const empresaLabel = "Empresa actual";
 
   return (

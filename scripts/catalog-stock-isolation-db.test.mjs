@@ -4,24 +4,19 @@ import { createHmac, randomUUID } from "node:crypto";
 import test from "node:test";
 
 import { createClient } from "@supabase/supabase-js";
-
-function localSupabaseEnv() {
-  const output = execFileSync("pnpm", ["exec", "supabase", "status", "-o", "env"], {
-    encoding: "utf8",
-  });
-  return Object.fromEntries(
-    output
-      .split("\n")
-      .map((line) => line.match(/^([A-Z_]+)="(.*)"$/))
-      .filter(Boolean)
-      .map((match) => [match[1], match[2]]),
-  );
-}
+import {
+  createCleanupRegistry,
+  createTrackedAuthProfile,
+  createTrackedCompany,
+  loadGuardedLocalSupabase,
+  runTrackedSetup,
+  trackedInsert,
+} from "./lib/local-auth-fixtures.mjs";
 
 function localDbQuery(sql) {
   return execFileSync(
     "docker",
-    ["exec", "supabase_db_ecommerce", "psql", "-U", "postgres", "-d", "postgres", "-Atc", sql],
+    ["exec", "supabase_db_ecommerce", "psql", "-X", "-U", "postgres", "-d", "postgres", "-Atc", sql],
     { encoding: "utf8" },
   ).trim();
 }
@@ -50,67 +45,133 @@ function authenticatedClient(env, userId) {
   });
 }
 
-const env = localSupabaseEnv();
-const service = createClient(env.API_URL, env.SERVICE_ROLE_KEY, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
+const { env, service } = loadGuardedLocalSupabase();
 
 async function createTenantFixture(label, stock) {
-  const empresaId = randomUUID();
-  const authUserId = randomUUID();
-  const profileId = randomUUID();
-  const productId = randomUUID();
-  const variantId = randomUUID();
-
-  const { error: empresaError } = await service.from("empresa").insert({
-    id: empresaId,
-    nombre: `Isolation ${label}`,
-    slug: `isolation-${label.toLowerCase()}-${empresaId}`,
+  const registry = createCleanupRegistry();
+  return runTrackedSetup(registry, async () => {
+    const empresaId = await createTrackedCompany(service, registry, `isolation-${label}`);
+    const identity = await createTrackedAuthProfile(service, registry, {
+      label: `isolation-${label}`,
+      empresaId,
+      role: "admin",
+      onboarding: false,
+    });
+    const productId = randomUUID();
+    const variantId = randomUUID();
+    await trackedInsert(service, registry, "producto", {
+      id: productId,
+      nombre: `Isolation Product ${label}`,
+      descripcion: "Cross-tenant stock regression fixture",
+      precio: 100,
+      stock: 0,
+      empresa_id: empresaId,
+      estado: "published",
+      usa_variantes: true,
+    });
+    await trackedInsert(service, registry, "producto_variante", {
+      id: variantId,
+      empresa_id: empresaId,
+      producto_id: productId,
+      talle: `Size ${label}`,
+      stock,
+      activo: true,
+    });
+    return { empresaId, ...identity, productId, variantId, stock, registry };
   });
-  assert.ifError(empresaError);
-
-  const { error: userError } = await service.from("usuario").insert({
-    id: profileId,
-    supabase_uid: authUserId,
-    nombre: `Isolation ${label}`,
-    correo: `isolation-${authUserId}@example.test`,
-    rol: "admin",
-    empresa_id: empresaId,
-    onboarding: false,
-  });
-  assert.ifError(userError);
-
-  const { error: productError } = await service.from("producto").insert({
-    id: productId,
-    nombre: `Isolation Product ${label}`,
-    descripcion: "Cross-tenant stock regression fixture",
-    precio: 100,
-    stock: 0,
-    empresa_id: empresaId,
-    estado: "published",
-    usa_variantes: true,
-  });
-  assert.ifError(productError);
-
-  const { error: variantError } = await service.from("producto_variante").insert({
-    id: variantId,
-    empresa_id: empresaId,
-    producto_id: productId,
-    talle: `Size ${label}`,
-    stock,
-    activo: true,
-  });
-  assert.ifError(variantError);
-
-  return { empresaId, authUserId, profileId, productId, variantId, stock };
 }
 
 async function cleanupFixture(fixture) {
-  await service.from("producto_variante").delete().eq("id", fixture.variantId);
-  await service.from("producto").delete().eq("id", fixture.productId);
-  await service.from("usuario").delete().eq("id", fixture.profileId);
-  await service.from("empresa").delete().eq("id", fixture.empresaId);
+  await fixture.registry.cleanup();
 }
+
+test("PostgREST empresa SELECT uses only canonical usuario tenancy", async () => {
+  const tenantA = await createTenantFixture("Empresa A", 13);
+  const tenantB = await createTenantFixture("Empresa B", 31);
+  const extraRegistry = createCleanupRegistry();
+  const legacyOwner = await createTrackedAuthProfile(service, extraRegistry, { label: "legacy-owner" });
+  const legacyCreator = await createTrackedAuthProfile(service, extraRegistry, { label: "legacy-creator" });
+  const nullCompany = await createTrackedAuthProfile(service, extraRegistry, { label: "null-company" });
+  const legacyOwnerId = legacyOwner.authUserId;
+  const legacyCreatorId = legacyCreator.authUserId;
+  const nullCompanyUserId = nullCompany.authUserId;
+
+  try {
+    const { error: legacyFieldsError } = await service
+      .from("empresa")
+      .upsert([
+        {
+          id: tenantA.empresaId,
+          nombre: "Isolation Empresa A",
+          slug: `isolation-empresa-a-${tenantA.empresaId}`,
+          owner_auth: legacyOwnerId,
+          created_by: tenantB.authUserId,
+        },
+        {
+          id: tenantB.empresaId,
+          nombre: "Isolation Empresa B",
+          slug: `isolation-empresa-b-${tenantB.empresaId}`,
+          owner_auth: tenantA.authUserId,
+          created_by: legacyCreatorId,
+        },
+      ]);
+    assert.ifError(legacyFieldsError);
+
+    const fixtureIds = [tenantA.empresaId, tenantB.empresaId];
+    const expectedByUser = [
+      [tenantA, tenantB],
+      [tenantB, tenantA],
+    ];
+    for (const [own, other] of expectedByUser) {
+      const client = authenticatedClient(env, own.authUserId);
+      const { data: visible, error: visibleError } = await client
+        .from("empresa")
+        .select("id")
+        .in("id", fixtureIds);
+      assert.ifError(visibleError);
+      assert.deepEqual(visible, [{ id: own.empresaId }]);
+
+      const { data: crossCompany, error: crossCompanyError } = await client
+        .from("empresa")
+        .select("id")
+        .eq("id", other.empresaId);
+      assert.ifError(crossCompanyError);
+      assert.deepEqual(crossCompany, []);
+    }
+
+    for (const deniedUserId of [legacyOwnerId, legacyCreatorId, randomUUID(), nullCompanyUserId]) {
+      const client = authenticatedClient(env, deniedUserId);
+      const { data, error } = await client.from("empresa").select("id").in("id", fixtureIds);
+      assert.ifError(error);
+      assert.deepEqual(data, []);
+    }
+
+    const anonResponse = await fetch(`${env.REST_URL}/empresa?select=id&id=in.(${fixtureIds.join(",")})`, {
+      headers: { apikey: env.ANON_KEY, Authorization: `Bearer ${env.ANON_KEY}` },
+    });
+    if (anonResponse.status === 200) {
+      assert.deepEqual(await anonResponse.json(), []);
+    } else {
+      assert.ok([401, 403].includes(anonResponse.status), "anon empresa read must be denied");
+    }
+
+    const { data: trustedRows, error: trustedError } = await service
+      .from("empresa")
+      .select("id")
+      .in("id", fixtureIds);
+    assert.ifError(trustedError);
+    assert.deepEqual(new Set(trustedRows.map(({ id }) => id)), new Set(fixtureIds));
+  } finally {
+    const { error: legacyFieldsError } = await service
+      .from("empresa")
+      .update({ owner_auth: null, created_by: null })
+      .in("id", [tenantA.empresaId, tenantB.empresaId]);
+    assert.ifError(legacyFieldsError);
+    await extraRegistry.cleanup();
+    await cleanupFixture(tenantA);
+    await cleanupFixture(tenantB);
+  }
+});
 
 test("PostgREST stock view denies anon and isolates two authenticated tenants", async () => {
   assert.equal(
