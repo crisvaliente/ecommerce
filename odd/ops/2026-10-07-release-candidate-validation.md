@@ -31,17 +31,29 @@ The local database mirrors production's schema drift (`odd/ops/rehearsal/`), so 
 
 `d3be722` preview: `https://ecommerce-5vlw-o2fdtz6k0-crisvalientes-projects.vercel.app` (GitHub deployment `success`). Unauthenticated probes: `/auth/login` 200, `/auth/register` 200, `/panel` 200 (client-side gate), `/api/panel/productos` 401, `/api/panel/categorias` 401. The storefront (`/coleccion`) returns 404 on previews by design (only `raeyz.com` is registered in `empresa_dominio`). **The preview uses the production database.**
 
-## Browser checklist (pending, done by the user)
+## Browser validation (2026-10-07, done by the user)
 
-Sign in with the user's Raeyz admin account. Use only test data created for this check and delete it at the end.
+Google sign-in on the Vercel preview cannot work today: the OAuth return URL comes from `APP_BASE_URL`, which Vercel shares between preview and production (`raeyz.com`), so the login landed on the old production deployment behind Cloudflare Access. The checklist was therefore run on the branch at `d3be722` locally (`pnpm dev`, `http://localhost:3000`) against the local database (production-like schema), with the local Raeyz admin (`owner@local.test`, email and password). Each step was cross-checked in the dev server log and with read-only queries on the local database.
 
-- [ ] B1 — `/auth/login` with the Raeyz admin, then `/panel` loads (no "No pudimos cargar tu perfil").
-- [ ] B2 — Categorías: create a test category, edit it, delete it.
-- [ ] B3 — Productos: the list loads.
-- [ ] B4 — Create a simple test product with stock 5. Edit only its name and save; edit only its stock to 7 and save (no stock-conflict message).
-- [ ] B5 — "Organizar por talles" on that product: message says 7 units moved to "Único"; the variant shows stock 7.
-- [ ] B6 — Delete the test product from the list.
-- [ ] B7 — Pedidos: the list and one order detail open.
-- [ ] B8 — Sign out; register a new test account at `/auth/register`; it signs in without a profile error (it must not enter `/panel`).
+| Step | Result | Evidence |
+|---|---|---|
+| B1 panel entry | ✅ admin, no profile error | panel APIs `200` |
+| B2 category create / edit / delete | ✅ | `POST 201` (company set by the server), `PATCH 200` (slug/orden updated), `DELETE 204` (row gone) |
+| B3 product list | ✅ | `GET /api/panel/productos 200` |
+| B4 simple product: create with stock 5, name-only save, stock-only save to 7 | ✅ | name-only save left stock 5; stock-only save wrote 7 (no conflict message) |
+| B5 "Organizar por talles" | ✅ "Se pasaron 7 unidades a la variante "Único"" | `POST …/modo-variantes 200`; product `usa_variantes = true`, stock 0; variant "Único" stock 7; summary 7 |
+| B6 delete product | ✅ "Producto eliminado" | `DELETE 204`; product and variant gone |
+| B7 orders list | ✅ (empty locally) | `GET /api/panel/pedidos 200` |
+| B8 sign-up and panel denial | ✅ | profile created by the Auth trigger (`cliente`, no company, `onboarding = true`); `/panel` → "Acceso no autorizado · Rol actual: cliente" |
+| Extra | ✅ | Pagos visible for admin; home, Nosotros, Contacto render; `/coleccion` 404 locally (no local domain registered) |
 
-After the checklist: read-only database verification of each effect (category gone, product gone, new profile created by the Auth trigger as `cliente`, no other row changed), then delete the B8 test account.
+The test category, product and account were removed (the account from the local database afterwards). Local state at the end: 1 Auth user, 1 profile, 0 categories and 0 products for the Raeyz company.
+
+Pre-existing bugs found (not regressions; follow-ups):
+- Categorías: the slug is auto-filled only while empty, so it keeps the first typed letter (`p` for "Prueba").
+- ProductForm: "Stock disponible hoy" is not refreshed after a stock save (shows the old value until reload; the saved value and the compare-and-set baseline are correct).
+- Storefront header: the signed-in user's name is white on the beige background.
+
+Launch follow-up: Google sign-in on previews needs a per-environment `APP_BASE_URL` and the preview URL in Supabase Auth redirect URLs.
+
+**Step 1 result: release candidate `d3be722` validated** (automated suites and browser checklist). Not covered: checkout and payment in a browser (no local products/domain and the Mercado Pago webhook is blocked); production compatibility of the currently deployed build.
