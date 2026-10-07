@@ -42,3 +42,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local tooling state
+.pi/
+.codegraph/
+.worktrees/
+openspec/changes/*/.gentle-ai-instance
