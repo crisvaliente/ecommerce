@@ -4,6 +4,7 @@ import ProductCard from "../../components/ui/ProductCard";
 import { useCart } from "../../components/ui/CartContext";
 import { instanceConfig } from "../../config/instance";
 import { supabaseServer } from "../../lib/supabaseServer";
+import { createStoreDomainLookup } from "../../lib/storeRequest";
 import {
   loadStorefrontCatalog,
   resolveStorefrontServerSideProps,
@@ -25,14 +26,7 @@ function formatStockLabel(stock: number): string {
 
 export const getServerSideProps: GetServerSideProps<PageProps> = async (context) =>
   resolveStorefrontServerSideProps(context, {
-    findByHostname: async (hostname) => {
-      const { data, error } = await supabaseServer
-        .from("empresa_dominio")
-        .select("empresa_id")
-        .eq("hostname", hostname)
-        .maybeSingle<{ empresa_id: string }>();
-      return { data, error };
-    },
+    findByHostname: createStoreDomainLookup(supabaseServer),
     loadCatalog: (empresaId) => loadStorefrontCatalog(empresaId, supabaseServer),
     logLookupFailure: (hostname) => {
       console.error("[storefront-tenant] lookup_failed", { hostname });
