@@ -24,6 +24,11 @@ calcula un fingerprint canónico del payload y la wrapper transaccional persiste
 - creación original fallida: la transacción revierte pedido y mapping
 - respuesta HTTP perdida después del commit: el retry recupera el pedido original
 
+La tienda del pedido sale del dominio de la solicitud (header `Host` y registro
+`empresa_dominio`), no del cuerpo: un `empresa_id` distinto responde
+`400 empresa_no_coincide_con_dominio`, un dominio desconocido `404 tienda_no_encontrada` y una
+falla del registro `503 tienda_no_disponible`. Solo se confía en el `Origin` de esa misma tienda.
+
 La wrapper agrega la frontera de idempotencia y serializa la misma key mediante advisory
 lock transaccional. La RPC de negocio `crear_pedido_con_items` valida, en el orden de las
 líneas del pedido, que cada producto sea de la empresa y esté publicado, y que la cantidad
@@ -44,7 +49,8 @@ agotó el stock, el pedido pagado queda `bloqueado`.
 
 - exige `POST`
 - aplica rate limit (`10` requests por minuto)
-- valida origin confiable cuando corresponde
+- resuelve la tienda por dominio y acepta solo el `Origin` de esa tienda
+- responde `404 pedido_no_encontrado` si el pedido es de otra tienda, sin crear intento ni preference
 - exige sesión válida de Supabase
 - resuelve `usuario.id` interno desde `supabase_uid`
 - llama a `public.crear_intento_pago(p_usuario_id, p_pedido_id, 'mercadopago')`
@@ -63,8 +69,8 @@ La RPC puede devolver:
 Si el intento quedó bien:
 
 - lee `pedido.total` y `pedido.expira_en`
-- arma `notification_url = {APP_BASE_URL}/api/webhooks/mercadopago`
-- arma `back_urls` hacia `/checkout/resultado?pedido_id=...&status=...`
+- arma `notification_url = {APP_BASE_URL}/api/webhooks/mercadopago` (un webhook para toda la plataforma)
+- arma `back_urls` hacia `{origen de la tienda}/checkout/resultado?pedido_id=...&status=...`: el `Origin` validado, o `https://{dominio de la tienda}` si no vino
 - crea la preference en `https://api.mercadopago.com/checkout/preferences`
 
 Payload relevante:
