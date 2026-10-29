@@ -5,9 +5,14 @@ import {
   checkRateLimit,
   hasBearerAuthorization,
   hasSessionAccessCookie,
-  isOriginValidationFailure,
-  validateTrustedOrigin,
 } from "../../../lib/apiSecurity";
+import {
+  createStoreDomainLookup,
+  resolveRequestStore,
+  storeOriginUrl,
+  validateStoreOrigin,
+} from "../../../lib/storeRequest";
+import { supabaseServer } from "../../../lib/supabaseServer";
 import {
   assertPreferenceMatchesPersisted,
   createMercadoPagoPreference,
@@ -162,13 +167,25 @@ export default async function handler(
     return res.status(429).json({ error: "rate_limit_exceeded" });
   }
 
-  const originValidation = validateTrustedOrigin(req, {
+  const storeResolution = await resolveRequestStore(req, createStoreDomainLookup(supabaseServer));
+
+  if (storeResolution.ok === false) {
+    if (storeResolution.status === 503) {
+      res.setHeader("Cache-Control", "no-store");
+      console.error("[intento-pago] store_lookup_failed", { hostname: storeResolution.hostname });
+    }
+    return res.status(storeResolution.status).json({ error: storeResolution.error });
+  }
+
+  const { store } = storeResolution;
+  const originValidation = validateStoreOrigin(req, store.hostname, {
     allowWithoutOrigin: hasBearerAuthorization(req) || !hasSessionAccessCookie(req),
   });
 
-  if (isOriginValidationFailure(originValidation)) {
+  if (originValidation.ok === false) {
     return res.status(403).json({ error: originValidation.reason });
   }
+  const storeUrl = storeOriginUrl(originValidation, store.hostname);
 
   if (
     !SUPABASE_URL ||
@@ -228,6 +245,23 @@ export default async function handler(
     return res.status(401).json({ error: "unauthorized" });
   }
 
+  // Another store's order is masked as not found, the code crear_intento_pago
+  // already returns for orders this buyer cannot pay.
+  const { data: storePedido, error: storePedidoError } = await serviceClient
+    .from("pedido")
+    .select("id")
+    .eq("id", pedidoId)
+    .eq("empresa_id", store.empresaId)
+    .maybeSingle();
+
+  if (storePedidoError) {
+    return res.status(500).json({ error: "unexpected_error" });
+  }
+
+  if (!storePedido?.id) {
+    return res.status(404).json({ error: "pedido_no_encontrado" });
+  }
+
   const { data: rpcData, error: rpcError } = await serviceClient.rpc(
     "crear_intento_pago",
     {
@@ -282,20 +316,22 @@ export default async function handler(
     return res.status(500).json({ error: "unexpected_error" });
   }
 
+  // One platform webhook receives every store's notifications; the buyer
+  // returns to the store they bought from.
   const notificationUrl = `${normalizeBaseUrl(APP_BASE_URL)}/api/webhooks/mercadopago`;
   const backUrls = {
     success: buildCheckoutResultUrl({
-      baseUrl: APP_BASE_URL,
+      baseUrl: storeUrl,
       pedidoId: row.pedido_id,
       status: "success",
     }),
     failure: buildCheckoutResultUrl({
-      baseUrl: APP_BASE_URL,
+      baseUrl: storeUrl,
       pedidoId: row.pedido_id,
       status: "failure",
     }),
     pending: buildCheckoutResultUrl({
-      baseUrl: APP_BASE_URL,
+      baseUrl: storeUrl,
       pedidoId: row.pedido_id,
       status: "pending",
     }),
