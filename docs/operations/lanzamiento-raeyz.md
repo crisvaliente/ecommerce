@@ -23,7 +23,7 @@ Marcá cada ítem cuando esté hecho y verificado.
 
 ### Pagos y checkout
 
-- [ ] **Deriva del checkout en producción.** `crear_pedido_con_items` no rechaza variantes sin stock: el cliente paga y el pedido queda bloqueado al consolidar. Necesita una migración que alinee la función con el repo (el archivo `20260331120000` se editó después de aplicarse).
+- [ ] **Deriva del checkout en producción.** `crear_pedido_con_items` no rechaza variantes sin stock: el cliente paga y el pedido queda bloqueado al consolidar. La migración `20261029120000_checkout_order_availability_guard.sql` ya está en el repo (Gate 4): alinea la función y además rechaza productos no publicados y cantidades mayores al stock. Falta aplicarla en producción con `supabase db push`, con backup previo.
 - [ ] **Confirmar el token de Mercado Pago** (de producción y no de sandbox) y separar credenciales de preview y producción.
 - [ ] **Prueba completa de compra** con el checkout de prueba de Mercado Pago: pedido, pago, webhook, consolidación y descuento de stock.
 
@@ -61,6 +61,7 @@ Ver `docs/architecture/decisiones/0001-raeyz-primer-tenant.md`.
 ### Base y datos
 
 - [ ] Una sola versión del CLI de Supabase: el repo fija `2.67.2` y el entorno local usa `2.114.0`.
+- [ ] `producto` tiene dos restricciones de estado superpuestas (`producto_estado_check` y `producto_estado_valido`): en la práctica solo se permiten `draft` y `published`. Decidir cuál queda.
 - [ ] Deriva de producción sin migración: estructura de `producto_categoria`, trigger `trg_producto_categoria_misma_empresa`, índices extra.
 - [ ] Datos de prueba en producción: EMPRESA_SMOKE con las cuentas "Federico" y "Prueba", 4 organizaciones personales vacías y 3 empresas vacías.
 - [ ] Modelo legacy: `membresia`, `ensure_personal_org`, y `empresa.created_by`/`owner_auth` con RESTRICT (bloquean borrar usuarios).

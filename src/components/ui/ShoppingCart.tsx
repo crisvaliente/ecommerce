@@ -4,11 +4,13 @@ import Link from 'next/link';
 import { FaShoppingCart, FaTrash, FaPlus, FaMinus } from 'react-icons/fa';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
+  checkoutOrderError,
   ensureCheckoutMarker,
   getCheckoutMarkerForCart,
   isHttpsInitPoint,
   persistCheckoutPedidoId,
   removeCheckoutMarker,
+  type CheckoutError,
   type CheckoutMarker,
 } from '../../lib/buyerCheckout';
 import { formatCurrency } from '../../lib/formatters';
@@ -27,11 +29,6 @@ type CheckoutState =
   | 'creating-payment'
   | 'redirecting'
   | 'error';
-
-type CheckoutError = {
-  message: string;
-  action: 'login' | 'address' | 'retry-order' | 'retry-payment' | 'retry-payment-manual' | null;
-};
 
 type AddressResponse = {
   direccion?: { id: string } | null;
@@ -56,31 +53,6 @@ const BUSY_STATES: CheckoutState[] = [
   'creating-payment',
   'redirecting',
 ];
-
-function orderError(error: string | undefined): CheckoutError {
-  switch (error) {
-    case 'direccion_envio_no_disponible':
-    case 'direccion_no_existe':
-    case 'direccion_no_pertenece_al_usuario':
-      return { message: 'Necesitás una dirección válida para continuar.', action: 'address' };
-    case 'variante_sin_stock':
-    case 'variante_inactiva':
-    case 'producto_no_existe':
-      return { message: 'Algunos productos ya no están disponibles. Revisá el carrito.', action: null };
-    case 'idempotency_key_reused':
-      return {
-        message: 'La intención de compra no coincide con el carrito actual. No generamos otro pedido por seguridad.',
-        action: null,
-      };
-    case 'unauthorized':
-      return { message: 'Tu sesión venció. Iniciá sesión para continuar.', action: 'login' };
-    default:
-      return {
-        message: 'No pudimos crear el pedido. Podés reintentar sin generar un pedido duplicado.',
-        action: 'retry-order',
-      };
-  }
-}
 
 function paymentError(error: string | undefined): CheckoutError {
   switch (error) {
@@ -243,7 +215,7 @@ const ShoppingCart: React.FC<ShoppingCartProps> = ({ isOpen, onClose }) => {
           removeCheckoutMarker(window.localStorage);
         }
         setCheckoutState('error');
-        setCheckoutError(orderError(body?.error));
+        setCheckoutError(checkoutOrderError(body?.error));
         return;
       }
 
