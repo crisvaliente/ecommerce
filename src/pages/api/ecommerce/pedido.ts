@@ -10,9 +10,12 @@ import {
   checkRateLimit,
   hasBearerAuthorization,
   hasSessionAccessCookie,
-  isOriginValidationFailure,
-  validateTrustedOrigin,
 } from "../../../lib/apiSecurity";
+import {
+  createStoreDomainLookup,
+  resolveRequestStore,
+  validateStoreOrigin,
+} from "../../../lib/storeRequest";
 
 const DOMAIN_ERROR_STATUS: Record<string, number> = {
   empresa_id_required: 400,
@@ -133,11 +136,22 @@ export default async function handler(
     return res.status(429).json({ error: "rate_limit_exceeded" });
   }
 
-  const originValidation = validateTrustedOrigin(req, {
+  const storeResolution = await resolveRequestStore(req, createStoreDomainLookup(supabaseServer));
+
+  if (storeResolution.ok === false) {
+    if (storeResolution.status === 503) {
+      res.setHeader("Cache-Control", "no-store");
+      console.error("[pedido] store_lookup_failed", { hostname: storeResolution.hostname });
+    }
+    return res.status(storeResolution.status).json({ error: storeResolution.error });
+  }
+
+  const { store } = storeResolution;
+  const originValidation = validateStoreOrigin(req, store.hostname, {
     allowWithoutOrigin: hasBearerAuthorization(req) || !hasSessionAccessCookie(req),
   });
 
-  if (isOriginValidationFailure(originValidation)) {
+  if (originValidation.ok === false) {
     return res.status(403).json({ error: originValidation.reason });
   }
 
@@ -148,8 +162,12 @@ export default async function handler(
   try {
     const { empresa_id, direccion_envio_id, items } = req.body ?? {};
 
-    if (!empresa_id) {
-      return res.status(400).json({ error: "empresa_id_required" });
+    if (
+      empresa_id != null &&
+      (typeof empresa_id !== "string" ||
+        empresa_id.trim().toLowerCase() !== store.empresaId.toLowerCase())
+    ) {
+      return res.status(400).json({ error: "empresa_no_coincide_con_dominio" });
     }
 
     const rawIdempotencyKey = req.headers["idempotency-key"];
@@ -226,7 +244,7 @@ export default async function handler(
 
     const rpcItems = items.map(toRpcItem);
     const requestFingerprint = createCheckoutRequestFingerprint({
-      empresaId: empresa_id,
+      empresaId: store.empresaId,
       direccionEnvioId: direccion_envio_id,
       items: rpcItems,
     });
@@ -235,7 +253,7 @@ export default async function handler(
       "crear_pedido_con_items_idempotente",
       {
         p_usuario_id: usuarioId,
-        p_empresa_id: empresa_id,
+        p_empresa_id: store.empresaId,
         p_direccion_envio_id: direccionEnvioId,
         p_items: rpcItems,
         p_idempotency_key: idempotencyKey,

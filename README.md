@@ -21,7 +21,7 @@ path: empresa/{empresaId}/producto/{productoId}/{imagenId}.{ext}
 
 Each instance must provide valid local files for its configured logo, hero, and favicon paths. Asset validation checks the paths, not the file contents.
 
-Secrets and deployment-specific URLs belong in `.env.local`, never in the JSON file. `APP_BASE_URL` is the canonical origin used for OAuth callbacks, trusted origins, and Mercado Pago webhook URLs.
+Secrets and deployment-specific URLs belong in `.env.local`, never in the JSON file. `APP_BASE_URL` is the platform origin: it receives the Mercado Pago webhook and is the trusted origin for panel APIs. Buyer checkout, payment return URLs, and sign-up redirects use the domain of the store the buyer is on (see Gate 2 tenant domains).
 
 ## Local baseline
 
@@ -94,7 +94,7 @@ Open the URL configured in `APP_BASE_URL`.
 
 ## Gate 2 tenant domains
 
-Public collection reads select a company only from the direct Node/Next `Host` header and an exact row in the private `public.empresa_dominio` registry. Query/body/cookie values, `Origin`, `Referer`, `X-Forwarded-Host`, `empresa.slug`, aliases, and localhost are never fallbacks. Branding, locale, currency, auth namespace, OAuth, and payment URLs remain instance-wide in v1.
+Public collection reads select a company only from the direct Node/Next `Host` header and an exact row in the private `public.empresa_dominio` registry. Query/body/cookie values, `Origin`, `Referer`, `X-Forwarded-Host`, `empresa.slug`, aliases, and localhost are never fallbacks. Buyer write APIs (`POST /api/ecommerce/pedido`, `POST /api/ecommerce/intento-pago`, `PUT /api/ecommerce/mi-cuenta/direccion`) resolve their store the same way: an unknown domain answers `404 tienda_no_encontrada`, a registry failure `503 tienda_no_disponible`, and only an `Origin`/`Referer` of that same store is trusted. Orders use the store of the domain (a different body `empresa_id` answers `400 empresa_no_coincide_con_dominio`), Mercado Pago `back_urls` return to that domain, and sign-up confirmation and Google sign-in return to `<current origin>/auth/callback`. Branding, locale, currency, auth namespace, and the Mercado Pago webhook URL remain instance-wide.
 
 Roll out in this order:
 
@@ -122,4 +122,4 @@ Invalid and unknown hosts intentionally return the generic 404. Registry infrast
 - An existing admin belonging to another tenant causes bootstrap to fail instead of being reassigned.
 - Demo seeding and smoke-user bootstrap reject non-local Supabase URLs.
 - Mercado Pago credentials are optional for admin/catalog and local order validation, but required before exercising checkout or webhooks.
-- OAuth providers must allow `${APP_BASE_URL}/auth/callback` in the corresponding Supabase project.
+- Supabase Auth must allow `https://<store domain>/auth/callback` for every store domain (and `${APP_BASE_URL}/auth/callback` locally) in its redirect URLs.

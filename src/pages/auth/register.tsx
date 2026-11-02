@@ -44,7 +44,7 @@ export default function RegisterPage() {
         email: email.trim().toLowerCase(),
         password,
         options: {
-          emailRedirectTo: buildOAuthCallbackUrl(),
+          emailRedirectTo: buildOAuthCallbackUrl(window.location.origin),
           data: { name },
         },
       });
@@ -87,7 +87,7 @@ export default function RegisterPage() {
     setFeedback(null);
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: buildOAuthCallbackUrl() },
+      options: { redirectTo: buildOAuthCallbackUrl(window.location.origin) },
     });
     if (error) setFeedback({ kind: "error", text: error.message });
   };

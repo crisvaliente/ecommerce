@@ -5,9 +5,13 @@ import {
   checkRateLimit,
   hasBearerAuthorization,
   hasSessionAccessCookie,
-  isOriginValidationFailure,
-  validateTrustedOrigin,
 } from "../../../../lib/apiSecurity";
+import {
+  createStoreDomainLookup,
+  resolveRequestStore,
+  validateStoreOrigin,
+} from "../../../../lib/storeRequest";
+import { supabaseServer } from "../../../../lib/supabaseServer";
 
 type DireccionPayload = {
   direccion: string;
@@ -101,12 +105,24 @@ export default async function handler(
     return res.status(429).json({ error: "rate_limit_exceeded" });
   }
 
+  // The address belongs to the buyer's account, shared by every store; only a
+  // write needs the store of this domain, to trust its origin.
   if (req.method === "PUT") {
-    const originValidation = validateTrustedOrigin(req, {
+    const storeResolution = await resolveRequestStore(req, createStoreDomainLookup(supabaseServer));
+
+    if (storeResolution.ok === false) {
+      if (storeResolution.status === 503) {
+        res.setHeader("Cache-Control", "no-store");
+        console.error("[direccion] store_lookup_failed", { hostname: storeResolution.hostname });
+      }
+      return res.status(storeResolution.status).json({ error: storeResolution.error });
+    }
+
+    const originValidation = validateStoreOrigin(req, storeResolution.store.hostname, {
       allowWithoutOrigin: hasBearerAuthorization(req) || !hasSessionAccessCookie(req),
     });
 
-    if (isOriginValidationFailure(originValidation)) {
+    if (originValidation.ok === false) {
       return res.status(403).json({ error: originValidation.reason });
     }
   }

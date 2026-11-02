@@ -38,7 +38,7 @@ Ver `docs/architecture/decisiones/0001-raeyz-primer-tenant.md`.
 
 - [ ] Mercado Pago por empresa.
 - [ ] Marca por empresa en la base (en lugar de `instance.config.json`).
-- [ ] Proceso de alta de dominio (Vercel + Cloudflare + `empresa_dominio`).
+- [ ] Proceso de alta de dominio (Vercel + Cloudflare + `empresa_dominio`). Cada dominio que sirve la tienda (incluido `www` si no redirige) tiene que estar en `empresa_dominio` y en las redirect URLs de Supabase Auth (`https://<dominio>/auth/callback`): desde el Gate 5 el checkout, el retorno del pago y el registro usan el dominio de la tienda.
 - [ ] Proyecto de staging en Supabase para pruebas y previews.
 
 ## 3. Deuda técnica
