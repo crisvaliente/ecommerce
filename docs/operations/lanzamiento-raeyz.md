@@ -34,7 +34,9 @@ Marcá cada ítem cuando esté hecho y verificado.
 
 ## 2. Antes de sumar la tienda #2
 
-Ver `docs/architecture/decisiones/0001-raeyz-primer-tenant.md`.
+Ver `docs/architecture/decisiones/0001-raeyz-primer-tenant.md` y `0002-plataforma-dominio-neutro.md`.
+
+- [ ] **Dominio de la plataforma** (ADR 0002): elegir y comprar el dominio neutro del panel, la autenticación de administradores y los webhooks. Gate preparado en `odd/tasks/platform-domain.md`.
 
 - [ ] Mercado Pago por empresa.
 - [ ] Marca por empresa en la base (en lugar de `instance.config.json`).
