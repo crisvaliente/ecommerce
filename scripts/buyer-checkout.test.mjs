@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   CHECKOUT_MARKER_STORAGE_KEY,
+  checkoutOrderError,
   createCartMarker,
   createSingleFlight,
   ensureCheckoutMarker,
@@ -186,6 +187,46 @@ test("UI wiring persists marker and order before payment and ignores provider st
   assert.doesNotMatch(resultSource, /router\.query\.status/);
   assert.match(resultSource, /pedidoEstado !== "pagado"/);
   assert.match(resultSource, /clearCartIfMatches\(marker\.cartMarker\)/);
+});
+
+test("S5: availability conflicts ask the buyer to review the cart", () => {
+  assert.deepEqual(checkoutOrderError("producto_no_disponible"), {
+    message: "Algunos productos ya no están disponibles. Revisá el carrito.",
+    action: null,
+  });
+  assert.deepEqual(checkoutOrderError("stock_insuficiente"), {
+    message: "No hay stock suficiente para alguna de las cantidades. Revisá el carrito.",
+    action: null,
+  });
+});
+
+test("S4: existing order errors keep their message and action", () => {
+  const unavailable = { message: "Algunos productos ya no están disponibles. Revisá el carrito.", action: null };
+  for (const code of ["variante_sin_stock", "variante_inactiva", "producto_no_existe"]) {
+    assert.deepEqual(checkoutOrderError(code), unavailable, code);
+  }
+  for (const code of ["direccion_envio_no_disponible", "direccion_no_existe", "direccion_no_pertenece_al_usuario"]) {
+    assert.deepEqual(
+      checkoutOrderError(code),
+      { message: "Necesitás una dirección válida para continuar.", action: "address" },
+      code,
+    );
+  }
+  assert.deepEqual(checkoutOrderError("idempotency_key_reused"), {
+    message: "La intención de compra no coincide con el carrito actual. No generamos otro pedido por seguridad.",
+    action: null,
+  });
+  assert.deepEqual(checkoutOrderError("unauthorized"), {
+    message: "Tu sesión venció. Iniciá sesión para continuar.",
+    action: "login",
+  });
+  for (const code of [undefined, "pedido_creation_failed"]) {
+    assert.deepEqual(
+      checkoutOrderError(code),
+      { message: "No pudimos crear el pedido. Podés reintentar sin generar un pedido duplicado.", action: "retry-order" },
+      String(code),
+    );
+  }
 });
 
 test("redirect, polling and auth-return guards fail closed", () => {

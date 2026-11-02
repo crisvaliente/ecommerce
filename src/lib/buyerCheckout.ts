@@ -247,6 +247,44 @@ export function isHttpsInitPoint(value: unknown): value is string {
   }
 }
 
+export type CheckoutError = {
+  message: string;
+  action: "login" | "address" | "retry-order" | "retry-payment" | "retry-payment-manual" | null;
+};
+
+const UNAVAILABLE_ITEMS_MESSAGE = "Algunos productos ya no están disponibles. Revisá el carrito.";
+
+export function checkoutOrderError(error: string | undefined): CheckoutError {
+  switch (error) {
+    case "direccion_envio_no_disponible":
+    case "direccion_no_existe":
+    case "direccion_no_pertenece_al_usuario":
+      return { message: "Necesitás una dirección válida para continuar.", action: "address" };
+    case "producto_no_disponible":
+    case "variante_sin_stock":
+    case "variante_inactiva":
+    case "producto_no_existe":
+      return { message: UNAVAILABLE_ITEMS_MESSAGE, action: null };
+    case "stock_insuficiente":
+      return {
+        message: "No hay stock suficiente para alguna de las cantidades. Revisá el carrito.",
+        action: null,
+      };
+    case "idempotency_key_reused":
+      return {
+        message: "La intención de compra no coincide con el carrito actual. No generamos otro pedido por seguridad.",
+        action: null,
+      };
+    case "unauthorized":
+      return { message: "Tu sesión venció. Iniciá sesión para continuar.", action: "login" };
+    default:
+      return {
+        message: "No pudimos crear el pedido. Podés reintentar sin generar un pedido duplicado.",
+        action: "retry-order",
+      };
+  }
+}
+
 export function shouldPollPedido(estado: string | null, attempts: number, maxAttempts: number): boolean {
   return estado === "pendiente_pago" && attempts < maxAttempts;
 }

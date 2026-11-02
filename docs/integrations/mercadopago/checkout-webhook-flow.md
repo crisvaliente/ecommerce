@@ -24,8 +24,19 @@ calcula un fingerprint canónico del payload y la wrapper transaccional persiste
 - creación original fallida: la transacción revierte pedido y mapping
 - respuesta HTTP perdida después del commit: el retry recupera el pedido original
 
-La RPC de negocio `crear_pedido_con_items` permanece sin cambios; la wrapper agrega la
-frontera de idempotencia y serializa la misma key mediante advisory lock transaccional.
+La wrapper agrega la frontera de idempotencia y serializa la misma key mediante advisory
+lock transaccional. La RPC de negocio `crear_pedido_con_items` valida, en el orden de las
+líneas del pedido, que cada producto sea de la empresa y esté publicado, y que la cantidad
+pedida no supere el stock (migración `20261029120000_checkout_order_availability_guard.sql`):
+
+- producto de otra empresa: `400 producto_no_pertenece_a_empresa` (se informa antes que la disponibilidad)
+- producto no publicado: `409 producto_no_disponible`
+- variante con stock `0`: `400 variante_sin_stock`
+- cantidad mayor al stock del producto simple o de la variante, sumando todas las líneas: `409 stock_insuficiente`
+
+Este control no reserva stock: lee sin bloqueos. `consolidar_pago_pedido` sigue siendo la
+autoridad final y bloquea las filas antes de descontar; si entre el pedido y el pago se
+agotó el stock, el pedido pagado queda `bloqueado`.
 
 ### 2) API crea o reutiliza intento interno
 

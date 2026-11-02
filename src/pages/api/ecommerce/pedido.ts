@@ -28,6 +28,8 @@ const DOMAIN_ERROR_STATUS: Record<string, number> = {
   direccion_no_pertenece_al_usuario: 400,
   producto_no_existe: 400,
   producto_no_pertenece_a_empresa: 400,
+  producto_no_disponible: 409,
+  stock_insuficiente: 409,
   variante_id_required: 400,
   variante_no_pertenece_al_producto: 400,
   variante_inactiva: 400,
