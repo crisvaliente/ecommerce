@@ -21,6 +21,7 @@ Decisión del 2026-11-02: **no se contrata Supabase Pro; se sigue con el plan gr
 | `data.sql` | `supabase db dump --linked --project-ref <ref> --data-only --use-copy` |
 | `schema_migrations_versions.txt` | versiones de `supabase_migrations.schema_migrations` (el dump no las incluye) |
 | `storage/` | `supabase storage cp -r ss:///producto-imagenes … --experimental --linked` |
+| `managed-schema-objects.sql` | objetos en esquemas gestionados que `supabase db dump` **omite**: triggers sobre `auth.users` (`pg_get_triggerdef`) y políticas de `storage` (`pg_policies`), capturados con una consulta de solo lectura. Sin este archivo, una base restaurada no crea el perfil de usuarios nuevos y Storage queda sin reglas de acceso |
 | `<funcion>.before.sql` | antes de una migración que redefine funciones: `pg_get_functiondef` de cada una (rollback exacto) |
 | `SHA256SUMS` | `sha256sum` de todos los archivos |
 
@@ -39,24 +40,25 @@ Comandos ejecutados desde un directorio fuera del repositorio (por ejemplo `/tmp
 
 Se restaura en un **stack local temporal y aislado** (proyecto Supabase local con otro `project_id` y otros puertos), nunca sobre producción ni sobre el stack de desarrollo.
 
-Pasos conocidos (aprendidos en el intento del 2026-11-02):
+Procedimiento verificado el 2026-11-02:
 
-1. Alinear las versiones de servicios con producción: `supabase link --project-ref <ref>` en la carpeta temporal (escribe solo archivos locales en `supabase/.temp`).
-2. `roles.sql` sin la línea `ALTER ROLE "supabase_admin" …` (rol reservado).
-3. `data.sql` sin `SET transaction_timeout = 0;` (lo escribe `pg_dump` 17; Postgres 15 no lo reconoce).
-4. **Abierto:** la carga se corta en `permission denied for table buckets_vectors` (tabla interna de Storage). Próximo intento: ejecutar la restauración conectado como `supabase_admin` (superusuario en la imagen local) en lugar de `postgres`. A verificar.
-5. Todo en una sola transacción (`psql --single-transaction -v ON_ERROR_STOP=1`): si falla, no queda nada a medias.
+1. Carpeta temporal fuera del control de versiones: `supabase init`, otro `project_id` y puertos distintos del stack de desarrollo.
+2. Alinear las versiones de servicios con producción: `supabase link --project-ref <ref>` en esa carpeta (escribe solo archivos locales en `supabase/.temp`). Con versiones distintas faltan tablas de Auth.
+3. `supabase start` con solo base, Auth y Storage (`-x realtime,imgproxy,kong,mailpit,postgrest,postgres-meta,studio,edge-runtime,logflare,vector,supavisor`).
+4. Conectar como **`supabase_admin`** (superusuario local; contraseña de desarrollo `postgres`, vía `-h 127.0.0.1`). Como `postgres` falla por permisos sobre tablas internas de Storage (`buckets_vectors`) y por el `ALTER ROLE "supabase_admin"` de `roles.sql`.
+5. En una sola transacción (`psql --single-transaction -v ON_ERROR_STOP=1`), en este orden: `roles.sql`, `schema.sql`, `SET session_replication_role = replica;`, `data.sql` sin la línea `SET transaction_timeout = 0;` (la escribe `pg_dump` 17 y Postgres 15 no la reconoce), `SET session_replication_role = origin;`, `managed-schema-objects.sql`. Si algo falla, no queda nada a medias.
 
 **Restauración verificada** significa:
 
 - 0 diferencias de filas por tabla contra el `data.sql`;
 - mismas cantidades de funciones y políticas que producción (`public`, `storage`) y el trigger de `auth.users`;
 - el archivo de rollback de funciones aplica sobre la base restaurada;
-- la migración pendiente aplica sobre la base restaurada.
+- la migración pendiente aplica sobre la base restaurada;
+- el trigger de Auth funciona: un usuario insertado en `auth.users` dentro de una transacción revertida crea su perfil en `public.usuario`.
 
 Al terminar se borran contenedores, volúmenes y la carpeta temporal.
 
-**Estado al 2026-11-02:** backup `2026-11-02-pre-gate4` íntegro y completo; rollback de la función probado; **restauración completa no verificada** (paso 4). Tiene que quedar resuelta antes de G6-1 (Gate 6), que crea la tabla de credenciales.
+**Estado al 2026-11-02:** backup `2026-11-02-pre-gate4` (con `managed-schema-objects.sql` agregado el mismo día) **restaurado y verificado**: 58 de 58 tablas con las mismas filas; 35 funciones y 48 políticas en `public`, 3 políticas en `storage` y 1 trigger en `auth.users`, iguales a producción; el trigger crea el perfil; la migración del Gate 4 y su rollback aplican. No probado: volver a subir los archivos de Storage a un Storage restaurado (los archivos están en el backup con su tamaño verificado). La verificación se repite con un backup fresco antes de cada migración sobre datos sensibles (la próxima: G6-1).
 
 ## 3. Rollback de una migración
 

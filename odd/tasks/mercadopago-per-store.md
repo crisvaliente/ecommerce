@@ -150,7 +150,7 @@ Each unit: test-first, independent verification, native review, then the sandbox
 
 - **Gate 5 (done):** store from the domain in `intento-pago`.
 - **ADR 0002 / platform-domain gate:** the webhook base is `APP_BASE_URL`; this gate does not depend on buying the platform domain (per-store credentials need no OAuth redirect URI). When the platform moves, each store's Mercado Pago application must get the new webhook URL; the runbook covers it.
-- **Verified restore (required, free plan):** no Supabase Pro (user decision 2026-11-02). Before G6-1 reaches production (it creates the credentials table and alters `intento_pago`) there must be a fresh backup that was restored successfully on an isolated local stack, per `docs/operations/respaldo-y-continuidad.md`. Today the full restore stops at `storage.buckets_vectors`; resolving it is a prerequisite.
+- **Verified restore (required, free plan):** no Supabase Pro (user decision 2026-11-02). Before G6-1 reaches production (it creates the credentials table and alters `intento_pago`) there must be a fresh backup that was restored successfully on an isolated local stack, per `docs/operations/respaldo-y-continuidad.md`. The procedure was verified on 2026-11-02 (full restore of the 02/11 backup matches production, including `auth.users` trigger and `storage` policies); it is repeated with a fresh backup before G6-1.
 - **Project pause (free plan):** check `supabase projects list` before every production step of this gate and before the sandbox-to-production switch; a paused project stops the webhook.
 - **FG Herramientas:** a business Mercado Pago account and its own application (questionnaire item 11).
 
