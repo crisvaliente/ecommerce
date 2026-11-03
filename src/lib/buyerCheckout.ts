@@ -285,6 +285,42 @@ export function checkoutOrderError(error: string | undefined): CheckoutError {
   }
 }
 
+export function checkoutPaymentError(error: string | undefined): CheckoutError {
+  switch (error) {
+    case "mercadopago_preference_in_progress":
+      return {
+        message: "La preparación del pago sigue en curso. Esperá unos segundos y reintentá.",
+        action: "retry-payment",
+      };
+    case "mercadopago_preference_ambiguous":
+      return {
+        message: "Mercado Pago todavía no confirmó la preference. Reintentá sobre el mismo pedido.",
+        action: "retry-payment",
+      };
+    case "mercadopago_preference_error":
+      return {
+        message: "Mercado Pago rechazó la creación de la preference. Podés iniciar un retry manual sobre el mismo pedido.",
+        action: "retry-payment-manual",
+      };
+    case "pedido_expirado":
+      return { message: "El pedido venció y ya no puede pagarse.", action: null };
+    case "pedido_bloqueado":
+      return { message: "El pedido está bloqueado y requiere revisión.", action: null };
+    case "pedido_no_pagable":
+      return { message: "El pedido ya no admite nuevos intentos de pago.", action: null };
+    case "unauthorized":
+      return { message: "Tu sesión venció. Iniciá sesión para continuar.", action: "login" };
+    case "pagos_no_configurados":
+    case "pagos_no_disponibles":
+      return { message: "Esta tienda todavía no puede cobrar online. Probá más tarde.", action: null };
+    default:
+      return {
+        message: "No pudimos iniciar Mercado Pago. El pedido quedó guardado y podés reintentar.",
+        action: "retry-payment",
+      };
+  }
+}
+
 export function shouldPollPedido(estado: string | null, attempts: number, maxAttempts: number): boolean {
   return estado === "pendiente_pago" && attempts < maxAttempts;
 }

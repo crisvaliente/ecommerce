@@ -134,7 +134,7 @@ Gate 6 (`odd/tasks/mercadopago-per-store.md`) stores each store's Mercado Pago a
 pnpm mp:credentials keygen --out-dir /path/outside/the/repo --key-version 1
 ```
 
-Prints the public and private PEM paths (modes `0644`/`0600`). Keep the public key in the repository or the runbook; the private key goes only to Vercel Production as `MP_CREDENTIALS_PRIVATE_KEY`.
+Prints the public and private PEM paths (modes `0644`/`0600`). Keep the public key in the repository or the runbook; the private key goes only to Vercel Production as `MP_CREDENTIALS_PRIVATE_KEY_V<n>` (one env var per `key_version`, e.g. `MP_CREDENTIALS_PRIVATE_KEY_V1`).
 
 `set` loads one store's credentials, reading the token and the webhook secret from stdin (never as flags or environment variables):
 
@@ -146,3 +146,5 @@ printf '%s\n%s\n' "$ACCESS_TOKEN" "$WEBHOOK_SECRET" | pnpm mp:credentials set \
 ```
 
 Use `--target linked --project-ref <ref>` for a linked project (not authorized for production in this gate). The command verifies the token against `GET /users/me` (Uruguay site, `MLU`), seals both values, and writes one row through the SQL runner; it never accepts a credential already configured for the store (`credenciales_ya_configuradas`) or a Mercado Pago account already attached to another store (`cuenta_ya_asociada`). Success prints only the company id, `mp_user_id`, `live_mode`, `key_version`, and the webhook path to configure in that store's Mercado Pago application.
+
+G6-2 rollout order: apply the migration → `keygen` → put the private key in Vercel Production as `MP_CREDENTIALS_PRIVATE_KEY_V<n>` → load each store's credentials with `set` → deploy G6-2. From then on, `POST /api/ecommerce/intento-pago` reads only the requesting store's row in `public.empresa_mercadopago`: a store without active credentials gets `409 pagos_no_configurados` before any payment attempt is created, and a store whose row cannot be decrypted (missing key, wrong `key_version`, tampered ciphertext) gets `503 pagos_no_disponibles`. `MERCADOPAGO_ACCESS_TOKEN` is no longer read by preference creation; `GET /api/panel/pagos` (capability `payments.access`) exposes only `{ configurado, live_mode, estado }` for the caller's own company.
