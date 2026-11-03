@@ -153,7 +153,7 @@ Each unit: test-first, independent verification, native review, then the sandbox
 - **ADR 0002 / platform-domain gate:** the webhook base is `APP_BASE_URL`; this gate does not depend on buying the platform domain (per-store credentials need no OAuth redirect URI). When the platform moves, each store's Mercado Pago application must get the new webhook URL; the runbook covers it.
 - **Verified restore (required, free plan):** no Supabase Pro (user decision 2026-11-02). Before G6-1 reaches production (it creates the credentials table and alters `intento_pago`) there must be a fresh backup that was restored successfully on an isolated local stack, per `docs/operations/respaldo-y-continuidad.md`. The procedure was verified on 2026-11-02 (full restore of the 02/11 backup matches production, including `auth.users` trigger and `storage` policies); it is repeated with a fresh backup before G6-1.
 - **Project pause (free plan):** check `supabase projects list` before every production step of this gate and before the sandbox-to-production switch; a paused project stops the webhook.
-- **FG Herramientas:** already has an active Mercado Pago account used with the Point device in the store (user, 2026-11-02). Online sales use the same account; pending: confirm it is a business account (RUT, invoicing), who creates the application in that account (D6-d), and how online stock follows in-store sales (questionnaire item 8): Point sales do not update the online stock.
+- **FG Herramientas:** active **business** Mercado Pago account (user, 2026-11-03), already used with the Point device in the store (user, 2026-11-02). Online sales use the same account. Pending: the store creates the application in that account (D6-d), and how online stock follows in-store sales (questionnaire item 8): Point sales do not update the online stock.
 
 ## Decisions (user, 2026-11-02)
 
@@ -197,6 +197,32 @@ Scope: schema, sealing module and operator command only. Preferences and webhook
 | T3 ✅ | C3, C5 | worker: operator command + `scripts/mp-credentials-cli.test.mjs` (mocked Mercado Pago) + local end-to-end `set` in the DB test + README | `c20b5a3` (shared with T1: the DB test runs the command end to end) |
 | T4 ✅ | C1–C5 | independent verify + full suites + native review per assess | `docs(odd): record G6-1 verification` |
 
+## G6-2 implementation specs (authorized 2026-11-03: "Merge #54 + arrancar G6-2 en local")
+
+Scope: preferences use the store's own credentials; the cart and the panel show the payment status. Local only; no push, production, Vercel or key generation without a separate decision.
+
+- **P1 — Store credentials, fail closed.** New `src/lib/storePaymentCredentials.ts`: `loadStoreMercadoPagoCredentials({ client, empresaId, env })` reads only `mp_user_id, live_mode, access_token_enc, key_version, estado` of the store's row and returns one of:
+  - `{ ok: true, accessToken, mpUserId, liveMode }` when the row exists, `estado = 'activo'`, the private key for the row's version is in `env.MP_CREDENTIALS_PRIVATE_KEY_V<key_version>` and `openCredential` succeeds;
+  - `{ ok: false, status: 409, error: "pagos_no_configurados" }` when there is no row or it is `inactivo`;
+  - `{ ok: false, status: 503, error: "pagos_no_disponibles", reason }` when the read fails, the key is missing or opening fails; `reason` is one of `lookup_failed`, `key_missing`, `decryption_failed` and is only for a log line.
+  Never a fallback to `MERCADOPAGO_ACCESS_TOKEN` or to another store; the token is returned in memory only and never logged.
+- **P2 — `POST /api/ecommerce/intento-pago`.** After the store-scoped order check and **before** `crear_intento_pago`, load the credentials (P1): `409 { "error": "pagos_no_configurados" }` or `503 { "error": "pagos_no_disponibles" }` with `Cache-Control: no-store` and one log line `[intento-pago] credentials_unavailable { empresa_id, reason }`; in both cases no payment attempt and no Mercado Pago call. Create, recover and reconcile use the store's token. `MERCADOPAGO_ACCESS_TOKEN` is no longer read here (nor required for `server_misconfigured`).
+- **P3 — Account stamp.** A new preference persists `intento_pago.mp_user_id = mpUserId` in the same update that stores the preference. If an attempt already has a different non-null `mp_user_id`, recover/reconcile/reuse answer `409 { "error": "mercadopago_preference_conflict" }` without calling Mercado Pago. A `null` (attempt created before G6-2) is accepted and stamped.
+- **P4 — `notification_url` unchanged** (`${APP_BASE_URL}/api/webhooks/mercadopago`) until G6-3 adds the per-store route; the webhook keeps verifying with the platform credentials in the meantime (only Raeyz can have live payments, and its stored account must be the same account as the env token).
+- **P5 — Cart message.** `checkoutPaymentError` moves from `ShoppingCart.tsx` to `src/lib/buyerCheckout.ts` (same messages and actions for every existing code) and adds `pagos_no_configurados` / `pagos_no_disponibles` → "Esta tienda todavía no puede cobrar online. Probá más tarde." with no action.
+- **P6 — Panel status (D6-c).** `GET /api/panel/pagos` with capability `payments.access` and the company of the canonical principal; any `empresa_id` input → `400 legacy_tenant_input` (same rule as the other panel APIs). Answers `200 { "configurado": boolean, "live_mode": boolean | null, "estado": "activo" | "inactivo" | null }` and selects only those columns; never the account id, webhook key, ciphertexts or key version. `/panel/payments` shows it in read only ("Pagos configurados (modo real|modo prueba)", "Pagos desactivados", "Pagos no configurados: pedile al operador de la plataforma que los cargue") and drops the disabled "Conectar MercadoPago (próximamente)" button.
+- **P7 — Existing behavior.** Every existing payment-attempt response on a configured store is unchanged (`pedido_id_invalido`, `pedido_expirado`, reuse of a ready preference, return URLs, `notification_url`); checkout order creation and the webhook are untouched.
+- **P8 — Docs.** README operator section: the private key goes to Vercel Production as `MP_CREDENTIALS_PRIVATE_KEY_V<n>`; rollout order: migration → `keygen` → private key in Vercel Production → load each store's credentials → deploy G6-2.
+
+## Tasks (G6-2)
+
+| ID | Specs | Route | Commit |
+|---|---|---|---|
+| T5 | P1 | worker: credentials loader + `scripts/store-payment-credentials.test.mjs` | — |
+| T6 | P2, P3, P4, P7 | worker: `intento-pago.ts` + `scripts/payment-attempt-api.test.mjs` (two stores, store without credentials, missing key, foreign `mp_user_id`) | — |
+| T7 | P5, P6, P8 | worker: cart message move + panel API + `/panel/payments` + tests + README | — |
+| T8 | P1–P8 | independent verify + suites + review per assess | — |
+
 ## Log
 
 - **L1** (user, 2026-11-02): "Autorizo el merge del PR #50, adoptar D1 (credenciales cifradas por comercio) como decisión arquitectónica y preparar Gate 6 exclusivamente como documentación y diseño." … "P1 y la implementación de Gate 6 quedan pendientes de autorización. Sin cambios productivos adicionales."
@@ -214,3 +240,5 @@ Scope: schema, sealing module and operator command only. Preferences and webhook
 - **L13** (2026-11-03, T4): independent `gentle-ai-verify` (task `mw0ldzkf-1-b7m3`) on `ebb5763..b405f63`: C1–C5 PASS, no BLOCKER or WARNING; reran the three new suites (10/10, 15/15, 7/7, table empty afterwards), `tsc` clean; checked live: RLS enabled and forced with 0 policies, grants (service_role select only), FK `on delete restrict`, 11 constraints; no real network calls; unrecognized `supabase db query` errors exit 1 (`insert_failed`), never success. Orchestrator spot check: `sqlLiteral` doubles single quotes (enough with `standard_conforming_strings`), numeric values validated as integers, the SQL file holds only ids and ciphertexts and is removed in a `finally`. SUGGESTIONS (not fixed): parse the `supabase db query` JSON error instead of matching constraint names in the text; the temporary directory is not removed if `chmod` fails before the `try` (it is still empty).
 - **L14** (2026-11-03, native review): `gentle_review assess` on `ebb5763..b405f63` (10 files, 1429 lines) returned tier **medium**, `reviewDue: false` (`under_budget`). Per the harness rule the native tier wins, so no native review was started; the independent verification covers the risk. A review can still be run on explicit user request.
 - **L15** (slice boundary): G6-1 is 1429 added lines over three code commits, above the ~400-line slice; kept as written because the migration, the sealing module and the operator command are one tested unit (the DB test drives the command end to end), and each lives in its own commit for review.
+- **L16** (user, 2026-11-03): "seguimos y fg tiene su cuenta de mercadopago de empresa" → "Merge #54 + arrancar G6-2 en local (recomendado)". PR #54 merged as `1fe6514` (deploy Ready, smoke unchanged). Branch `feat/mercadopago-preferences-per-store` from `master`.
+- **L17** (decision, ordering): G6-2 keeps `notification_url` on the existing route (the per-store route arrives in G6-3), and once G6-2 is deployed a store without loaded credentials cannot charge, Raeyz included; rollout order recorded in P8.
