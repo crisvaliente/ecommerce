@@ -17,7 +17,8 @@
     "test:checkout-idempotency:db": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test scripts/checkout-idempotency-db.test.mjs",
     "bootstrap:instance": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/bootstrap-instance.mjs",
     "seed:optional": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/bootstrap-instance.mjs --seed",
-    "smoke:bootstrap": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/bootstrap-smoke-users.mjs"
+    "smoke:bootstrap": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/bootstrap-smoke-users.mjs",
+    "mp:credentials": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/mp-credentials.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.8",

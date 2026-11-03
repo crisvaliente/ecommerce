@@ -123,3 +123,26 @@ Invalid and unknown hosts intentionally return the generic 404. Registry infrast
 - Demo seeding and smoke-user bootstrap reject non-local Supabase URLs.
 - Mercado Pago credentials are optional for admin/catalog and local order validation, but required before exercising checkout or webhooks.
 - Supabase Auth must allow `https://<store domain>/auth/callback` for every store domain (and `${APP_BASE_URL}/auth/callback` locally) in its redirect URLs.
+
+## Mercado Pago credentials (operator)
+
+Gate 6 (`odd/tasks/mercadopago-per-store.md`) stores each store's Mercado Pago access token and webhook secret sealed with the platform's public key in `public.empresa_mercadopago`; the private key never leaves Vercel Production, so the operator's machine, the database, and a dump can never decrypt them. G6-1 ships the schema, the sealing module, and this command; checkout and webhooks keep using the env credentials until G6-2/G6-3.
+
+`keygen` generates a key pair once per `key_version`, outside the repository:
+
+```bash
+pnpm mp:credentials keygen --out-dir /path/outside/the/repo --key-version 1
+```
+
+Prints the public and private PEM paths (modes `0644`/`0600`). Keep the public key in the repository or the runbook; the private key goes only to Vercel Production as `MP_CREDENTIALS_PRIVATE_KEY`.
+
+`set` loads one store's credentials, reading the token and the webhook secret from stdin (never as flags or environment variables):
+
+```bash
+printf '%s\n%s\n' "$ACCESS_TOKEN" "$WEBHOOK_SECRET" | pnpm mp:credentials set \
+  --empresa <empresa-uuid> --mode live --key-version 1 \
+  --public-key-file /path/outside/the/repo/mercadopago-credentials-v1.public.pem \
+  --target local
+```
+
+Use `--target linked --project-ref <ref>` for a linked project (not authorized for production in this gate). The command verifies the token against `GET /users/me` (Uruguay site, `MLU`), seals both values, and writes one row through the SQL runner; it never accepts a credential already configured for the store (`credenciales_ya_configuradas`) or a Mercado Pago account already attached to another store (`cuenta_ya_asociada`). Success prints only the company id, `mp_user_id`, `live_mode`, `key_version`, and the webhook path to configure in that store's Mercado Pago application.
