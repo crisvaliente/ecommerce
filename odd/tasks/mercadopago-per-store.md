@@ -162,6 +162,41 @@ Each unit: test-first, independent verification, native review, then the sandbox
 - **D6-c** — Panel: **read-only payment status** for store administrators. A panel API (capability `payments.access`, company from the canonical principal) returns only `{ configurado, live_mode, estado }` for the administrator's own company; never tokens, secrets, ciphertext, `mp_user_id` or `webhook_key`. No credential form in this gate.
 - **D6-d** — **Each store owns its Mercado Pago application** in its own account and hands the token and webhook secret to the operator through the loading command; the operator never signs in to a store's Mercado Pago account.
 
+## G6-1 implementation specs (authorized 2026-11-03: "adelante 1 y 2")
+
+Scope: schema, sealing module and operator command only. Preferences and webhooks keep using the env credentials until G6-2/G6-3. Local database only; no production apply, no Vercel change, no push without a separate decision.
+
+- **C1 — Migration** `supabase/migrations/20261103120000_mercadopago_per_store_credentials.sql`, one transaction with `lock_timeout`/`statement_timeout` like the other migrations, additive only:
+  - `public.empresa_mercadopago` with the columns of "Data" above; checks: `mp_user_id > 0`; `webhook_key ~ '^[A-Za-z0-9_-]{43}$'` (32 random bytes, base64url); `access_token_enc`, `webhook_secret_enc` not null and starting with `v1:`; `previous_webhook_secret_enc` starts with `v1:` when present and is null exactly when `previous_secret_valid_until` is null; `key_version > 0`; `estado in ('activo','inactivo')` default `'activo'`; `unique (mp_user_id, live_mode)`; `empresa_id` FK `on delete restrict`; timestamps default `now()`.
+  - RLS enabled **and forced**, no policies; `revoke all` from `public`, `anon`, `authenticated`, `service_role`; `grant select` to `service_role`. Writes happen as `postgres`, which has `BYPASSRLS` locally and in production (checked read-only 2026-11-03).
+  - `intento_pago.mp_user_id bigint null` with `check (mp_user_id > 0)`; `webhook_recepcion_mp.empresa_id uuid null references empresa(id) on delete restrict`. Existing rows unchanged.
+- **C2 — Sealing module** `src/lib/mercadoPagoCredentials.ts` (server only, Node `crypto`, no new dependency):
+  - `generateCredentialKeyPair()` → `{ publicKeyPem, privateKeyPem }` (X25519, SPKI/PKCS#8 PEM).
+  - `sealCredential({ publicKeyPem, plaintext, empresaId, field, keyVersion })` → `v1:<ephemeral SPKI DER>:<12-byte IV>:<ciphertext>:<16-byte tag>`, each part base64url. Shared secret X25519(ephemeral private, recipient public); key = HKDF-SHA256(ikm = shared secret, salt = ephemeral SPKI DER ‖ recipient SPKI DER, info = `ecommerce-platform/mercadopago-credentials/v1`, 32 bytes); AES-256-GCM with associated data `${empresaId}|${field}|${keyVersion}` (UTF-8). A new ephemeral key and IV for every seal.
+  - `openCredential({ privateKeyPem, sealed, empresaId, field, keyVersion })` → plaintext.
+  - `field` ∈ `access_token`, `webhook_secret`; `empresaId` a UUID; `keyVersion` a positive integer; plaintext non-empty and at most 4096 bytes.
+  - Every failure throws `CredentialSealError` whose `code` and `message` are only one of `invalid_input`, `invalid_format`, `decryption_failed`; never the plaintext, the sealed value or a key. No logging.
+- **C3 — Operator command** `scripts/mp-credentials.mjs` (logic in `scripts/lib/mp-credentials.mjs`, injectable `fetch`, SQL runner and stdin), npm script `mp:credentials`:
+  - `keygen --out-dir <dir> --key-version <n>`: the directory must exist and be outside the repository; writes `mercadopago-credentials-v<n>.public.pem` (mode 0644) and `mercadopago-credentials-v<n>.private.pem` (mode 0600); refuses to overwrite; prints only the two paths.
+  - `set --empresa <uuid> --mode live|test --key-version <n> --public-key-file <path> --target local|linked [--project-ref <ref>]` (`--project-ref` required exactly for `linked`):
+    1. reads exactly two non-empty lines from stdin: access token, then webhook secret; secrets are never accepted as arguments or environment variables;
+    2. `GET https://api.mercadopago.com/users/me` with the token must answer 200 with a positive integer `id` and `site_id` `MLU`; otherwise exit 1 naming only the failed check;
+    3. seals both values (C2), generates `webhook_key`, and runs one `insert` with only ids and ciphertexts through `supabase db query --local|--linked [--project-ref <ref>] --output-format json -f <file>`; the SQL file lives in a private temporary directory (0700/0600) and is deleted in every outcome;
+    4. a store that already has a row → exit 1 `credenciales_ya_configuradas` (rotation is a later unit); an account already attached to another store (`unique (mp_user_id, live_mode)`) → exit 1 `cuenta_ya_asociada`; in both cases nothing changes;
+    5. success prints only: company id, `mp_user_id`, `live_mode`, `key_version`, `Webhook path: /api/webhooks/mercadopago/<webhook_key>`.
+  - Exit codes: 0 success, 1 validation or database failure, 2 usage error (unknown or missing flag). The plaintext token and secret never appear in stdout, stderr, arguments, environment, files or the database.
+- **C4 — Existing behavior.** Checkout, preferences, webhook and every existing suite behave as before; the migration only adds.
+- **C5 — Docs.** README gets a short "Mercado Pago credentials (operator)" section with both subcommands; this document records evidence per task.
+
+## Tasks (G6-1)
+
+| ID | Specs | Route | Commit |
+|---|---|---|---|
+| T1 | C1, C4 | worker: migration + `scripts/mercadopago-credentials-db.test.mjs` (privileges, RLS, constraints, FK, new columns), applied to the local database | — |
+| T2 | C2 | worker: sealing module + `scripts/mercadopago-credentials.test.mjs` | — |
+| T3 | C3, C5 | worker: operator command + `scripts/mp-credentials-cli.test.mjs` (mocked Mercado Pago) + local end-to-end `set` in the DB test + README | — |
+| T4 | C1–C5 | independent verify + full suites + native review; one commit per task | — |
+
 ## Log
 
 - **L1** (user, 2026-11-02): "Autorizo el merge del PR #50, adoptar D1 (credenciales cifradas por comercio) como decisión arquitectónica y preparar Gate 6 exclusivamente como documentación y diseño." … "P1 y la implementación de Gate 6 quedan pendientes de autorización. Sin cambios productivos adicionales."
@@ -171,3 +206,4 @@ Each unit: test-first, independent verification, native review, then the sandbox
 - **L5** (user, 2026-11-02): "Decisión: no vamos a contratar Supabase Pro. Continuamos con el plan gratuito." … "Mantenemos la restauración verificable como requisito antes de migraciones de datos sensibles." Dependencies updated; backup/restore/continuity strategy in `docs/operations/respaldo-y-continuidad.md`.
 - **L6** (user, 2026-11-02): D6-a "Clave pública (recomendado)"; D6-b "A los 30 días sin tráfico (recomendado)"; D6-c "Sí, solo lectura (recomendado)"; D6-d "Cada comercio, en su cuenta (recomendado)". Implementation still not authorized.
 - **L7** (user, 2026-11-02): "ellos tienen su propia cuenta de mercado pago hasta con pos" … "pos de mercadopago el amarillo" (Mercado Pago Point).
+- **L8** (user, 2026-11-03): "adelante 1 y 2" — push and PR of the docs branch (#52) and implementation of G6-1 in a local branch, test-first. Branch `feat/mercadopago-credentials-store`, stacked on `docs/verified-restore-procedure` (`ebb5763`).
