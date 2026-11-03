@@ -8,8 +8,9 @@ Marcá cada ítem cuando esté hecho y verificado.
 
 ### Infraestructura
 
-- [ ] **Supabase en plan pago (Pro).** El plan gratis pausa la base después de unos días sin uso; ya pasó antes del 06/10 y la tienda queda caída. El plan pago además trae backups diarios: hoy no hay ninguno, solo el backup manual del 30/09 en `~/backups/raeyz/`, que nunca se probó restaurando.
-  *Dónde:* Dashboard de Supabase → proyecto Raeyz → Billing.
+- [x] ~~Supabase en plan pago (Pro).~~ Decisión del 2026-11-02: se sigue con el plan gratuito. Los huecos (pausa por inactividad, sin backups gestionados) se cubren con `docs/operations/respaldo-y-continuidad.md`.
+- [ ] **Restauración verificada del backup.** Requisito antes de migraciones sobre datos sensibles. Hoy el backup del 02/11 es íntegro y completo, pero la restauración completa se corta en `storage.buckets_vectors`. Ver `respaldo-y-continuidad.md`, punto 2.
+- [ ] **Chequeo semanal** (estado del proyecto, backup, límites del plan) en marcha desde la apertura de la tienda.
 - [ ] **Webhook de Mercado Pago.** Cloudflare Access también bloquea `/api/webhooks/mercadopago`, así que hoy ningún pago real se consolidaría. Al abrir la tienda: sacar Access, o dejarlo y agregar una excepción para esa ruta.
   *Dónde:* Cloudflare → Zero Trust → Access → Applications.
 - [ ] **`www.raeyz.com`.** Resuelve a Cloudflare pero no está conectado a la tienda. Configurar una redirección de `www` a `raeyz.com`.
