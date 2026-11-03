@@ -150,7 +150,8 @@ Each unit: test-first, independent verification, native review, then the sandbox
 
 - **Gate 5 (done):** store from the domain in `intento-pago`.
 - **ADR 0002 / platform-domain gate:** the webhook base is `APP_BASE_URL`; this gate does not depend on buying the platform domain (per-store credentials need no OAuth redirect URI). When the platform moves, each store's Mercado Pago application must get the new webhook URL; the runbook covers it.
-- **Supabase Pro and a proven restore** are recommended before G6-1 reaches production (first migration of this gate).
+- **Verified restore (required, free plan):** no Supabase Pro (user decision 2026-11-02). Before G6-1 reaches production (it creates the credentials table and alters `intento_pago`) there must be a fresh backup that was restored successfully on an isolated local stack, per `docs/operations/respaldo-y-continuidad.md`. Today the full restore stops at `storage.buckets_vectors`; resolving it is a prerequisite.
+- **Project pause (free plan):** check `supabase projects list` before every production step of this gate and before the sandbox-to-production switch; a paused project stops the webhook.
 - **FG Herramientas:** a business Mercado Pago account and its own application (questionnaire item 11).
 
 ## Open decisions
@@ -166,3 +167,4 @@ Each unit: test-first, independent verification, native review, then the sandbox
 - **L2** (evidence): PR #50 merged as `2550b83`; production deploy Ready, app code unchanged (`git diff 8dcc3da 2550b83 -- src scripts supabase` empty).
 - **L3** (correction): an earlier session note said the webhook lookup fallback was not restricted to non-production; `index.ts:128-130` shows it is (`NODE_ENV !== "production"`).
 - **L4** (user, 2026-11-02): paused for usage limits after ADR 0003 (`ea8c111`); resumed with "retoma laburo".
+- **L5** (user, 2026-11-02): "Decisión: no vamos a contratar Supabase Pro. Continuamos con el plan gratuito." … "Mantenemos la restauración verificable como requisito antes de migraciones de datos sensibles." Dependencies updated; backup/restore/continuity strategy in `docs/operations/respaldo-y-continuidad.md`.
