@@ -5,6 +5,7 @@ import { FaShoppingCart, FaTrash, FaPlus, FaMinus } from 'react-icons/fa';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   checkoutOrderError,
+  checkoutPaymentError,
   ensureCheckoutMarker,
   getCheckoutMarkerForCart,
   isHttpsInitPoint,
@@ -54,38 +55,6 @@ const BUSY_STATES: CheckoutState[] = [
   'redirecting',
 ];
 
-function paymentError(error: string | undefined): CheckoutError {
-  switch (error) {
-    case 'mercadopago_preference_in_progress':
-      return {
-        message: 'La preparación del pago sigue en curso. Esperá unos segundos y reintentá.',
-        action: 'retry-payment',
-      };
-    case 'mercadopago_preference_ambiguous':
-      return {
-        message: 'Mercado Pago todavía no confirmó la preference. Reintentá sobre el mismo pedido.',
-        action: 'retry-payment',
-      };
-    case 'mercadopago_preference_error':
-      return {
-        message: 'Mercado Pago rechazó la creación de la preference. Podés iniciar un retry manual sobre el mismo pedido.',
-        action: 'retry-payment-manual',
-      };
-    case 'pedido_expirado':
-      return { message: 'El pedido venció y ya no puede pagarse.', action: null };
-    case 'pedido_bloqueado':
-      return { message: 'El pedido está bloqueado y requiere revisión.', action: null };
-    case 'pedido_no_pagable':
-      return { message: 'El pedido ya no admite nuevos intentos de pago.', action: null };
-    case 'unauthorized':
-      return { message: 'Tu sesión venció. Iniciá sesión para continuar.', action: 'login' };
-    default:
-      return {
-        message: 'No pudimos iniciar Mercado Pago. El pedido quedó guardado y podés reintentar.',
-        action: 'retry-payment',
-      };
-  }
-}
 
 const ShoppingCart: React.FC<ShoppingCartProps> = ({ isOpen, onClose }) => {
   const {
@@ -256,7 +225,7 @@ const ShoppingCart: React.FC<ShoppingCartProps> = ({ isOpen, onClose }) => {
     const paymentBody = (await paymentResponse.json().catch(() => null)) as PaymentResponse | null;
     if (!paymentResponse.ok || !paymentBody?.intento_pago) {
       setCheckoutState('error');
-      setCheckoutError(paymentError(paymentBody?.error));
+      setCheckoutError(checkoutPaymentError(paymentBody?.error));
       return;
     }
     if (

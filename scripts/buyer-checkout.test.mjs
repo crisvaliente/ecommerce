@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   CHECKOUT_MARKER_STORAGE_KEY,
   checkoutOrderError,
+  checkoutPaymentError,
   createCartMarker,
   createSingleFlight,
   ensureCheckoutMarker,
@@ -240,4 +241,55 @@ test("redirect, polling and auth-return guards fail closed", () => {
   assert.equal(getSafeAuthReturn("/coleccion"), "/coleccion");
   assert.equal(getSafeAuthReturn("https://evil.example"), "/coleccion");
   assert.equal(getSafeAuthReturn("/panel"), "/coleccion");
+});
+
+test("G6-2/P5: existing payment errors keep their exact message and action", () => {
+  assert.deepEqual(checkoutPaymentError("mercadopago_preference_in_progress"), {
+    message: "La preparación del pago sigue en curso. Esperá unos segundos y reintentá.",
+    action: "retry-payment",
+  });
+  assert.deepEqual(checkoutPaymentError("mercadopago_preference_ambiguous"), {
+    message: "Mercado Pago todavía no confirmó la preference. Reintentá sobre el mismo pedido.",
+    action: "retry-payment",
+  });
+  assert.deepEqual(checkoutPaymentError("mercadopago_preference_error"), {
+    message: "Mercado Pago rechazó la creación de la preference. Podés iniciar un retry manual sobre el mismo pedido.",
+    action: "retry-payment-manual",
+  });
+  assert.deepEqual(checkoutPaymentError("pedido_expirado"), {
+    message: "El pedido venció y ya no puede pagarse.",
+    action: null,
+  });
+  assert.deepEqual(checkoutPaymentError("pedido_bloqueado"), {
+    message: "El pedido está bloqueado y requiere revisión.",
+    action: null,
+  });
+  assert.deepEqual(checkoutPaymentError("pedido_no_pagable"), {
+    message: "El pedido ya no admite nuevos intentos de pago.",
+    action: null,
+  });
+  assert.deepEqual(checkoutPaymentError("unauthorized"), {
+    message: "Tu sesión venció. Iniciá sesión para continuar.",
+    action: "login",
+  });
+  for (const code of [undefined, "unexpected_error"]) {
+    assert.deepEqual(
+      checkoutPaymentError(code),
+      {
+        message: "No pudimos iniciar Mercado Pago. El pedido quedó guardado y podés reintentar.",
+        action: "retry-payment",
+      },
+      String(code),
+    );
+  }
+});
+
+test("G6-2/P5: a store without loaded Mercado Pago credentials shows a non-actionable message", () => {
+  for (const code of ["pagos_no_configurados", "pagos_no_disponibles"]) {
+    assert.deepEqual(
+      checkoutPaymentError(code),
+      { message: "Esta tienda todavía no puede cobrar online. Probá más tarde.", action: null },
+      code,
+    );
+  }
 });

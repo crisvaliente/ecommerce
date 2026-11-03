@@ -13,6 +13,7 @@ import {
   validateStoreOrigin,
 } from "../../../lib/storeRequest";
 import { supabaseServer } from "../../../lib/supabaseServer";
+import { loadStoreMercadoPagoCredentials } from "../../../lib/storePaymentCredentials";
 import {
   assertPreferenceMatchesPersisted,
   createMercadoPagoPreference,
@@ -47,6 +48,7 @@ type IntentoPreferenceRow = {
   preference_creation_state: PreferenceBridgeState;
   preference_creation_started_at: string | null;
   preference_last_error: string | null;
+  mp_user_id: number | null;
 };
 
 type ApiOk = {
@@ -66,7 +68,6 @@ type ApiErr = {
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const MP_ACCESS_TOKEN = process.env.MERCADOPAGO_ACCESS_TOKEN;
 const APP_BASE_URL = process.env.APP_BASE_URL;
 
 function getAccessToken(req: NextApiRequest): string | null {
@@ -123,7 +124,7 @@ function buildCheckoutResultUrl(params: {
 }
 
 const PREFERENCE_SELECT =
-  "id, preference_id, preference_init_point, preference_creation_state, preference_creation_started_at, preference_last_error";
+  "id, preference_id, preference_init_point, preference_creation_state, preference_creation_started_at, preference_last_error, mp_user_id";
 
 function preferenceErrorCode(error: unknown): string {
   return error instanceof MercadoPagoBridgeError
@@ -191,7 +192,6 @@ export default async function handler(
     !SUPABASE_URL ||
     !ANON_KEY ||
     !SERVICE_ROLE ||
-    !MP_ACCESS_TOKEN ||
     !APP_BASE_URL
   ) {
     return res.status(500).json({ error: "server_misconfigured" });
@@ -260,6 +260,23 @@ export default async function handler(
 
   if (!storePedido?.id) {
     return res.status(404).json({ error: "pedido_no_encontrado" });
+  }
+
+  const credentials = await loadStoreMercadoPagoCredentials({
+    client: serviceClient,
+    empresaId: store.empresaId,
+    env: process.env,
+  });
+
+  if (credentials.ok === false) {
+    res.setHeader("Cache-Control", "no-store");
+    if (credentials.status === 503) {
+      console.error("[intento-pago] credentials_unavailable", {
+        empresa_id: store.empresaId,
+        reason: credentials.reason,
+      });
+    }
+    return res.status(credentials.status).json({ error: credentials.error });
   }
 
   const { data: rpcData, error: rpcError } = await serviceClient.rpc(
@@ -386,6 +403,7 @@ export default async function handler(
             preference_init_point: preference.init_point,
             preference_creation_state: "ready",
             preference_last_error: null,
+            mp_user_id: credentials.mpUserId,
           })
           .eq("id", row.intento_pago_id)
           .eq("preference_id", preference.id)
@@ -397,6 +415,7 @@ export default async function handler(
             preference_init_point: preference.init_point,
             preference_creation_state: "ready",
             preference_last_error: null,
+            mp_user_id: credentials.mpUserId,
           })
           .eq("id", row.intento_pago_id)
           .is("preference_id", null)
@@ -489,6 +508,10 @@ export default async function handler(
     return res.status(502).json({ error: "mercadopago_preference_error" });
   }
 
+  if (intento.mp_user_id !== null && intento.mp_user_id !== credentials.mpUserId) {
+    return res.status(409).json({ error: "mercadopago_preference_conflict" });
+  }
+
   if (mode === "reuse") {
     if (intento.preference_creation_state !== "ready") {
       const { data: normalized, error } = await serviceClient
@@ -504,10 +527,25 @@ export default async function handler(
       }
       intento = normalized as IntentoPreferenceRow;
     }
+    // Attempts created before per-store credentials carry no account; record
+    // the store's account so later notifications can be matched to it.
+    if (intento.mp_user_id === null) {
+      const { data: stamped, error } = await serviceClient
+        .from("intento_pago")
+        .update({ mp_user_id: credentials.mpUserId })
+        .eq("id", row.intento_pago_id)
+        .is("mp_user_id", null)
+        .select(PREFERENCE_SELECT)
+        .maybeSingle();
+      if (error || !stamped?.id) {
+        return res.status(409).json({ error: "mercadopago_preference_conflict" });
+      }
+      intento = stamped as IntentoPreferenceRow;
+    }
   } else if (mode === "recover") {
     try {
       const recovered = await recoverMercadoPagoPreference({
-        accessToken: MP_ACCESS_TOKEN,
+        accessToken: credentials.accessToken,
         preferenceId: intento.preference_id as string,
         expected: expectedPreference,
       });
@@ -530,7 +568,7 @@ export default async function handler(
     if (mode === "claim") {
       try {
         resolved = await createMercadoPagoPreference({
-          accessToken: MP_ACCESS_TOKEN,
+          accessToken: credentials.accessToken,
           expected: expectedPreference,
           notificationUrl,
           backUrls,
@@ -549,7 +587,7 @@ export default async function handler(
     if (mode === "reconcile") {
       try {
         resolved = await reconcileMercadoPagoPreference({
-          accessToken: MP_ACCESS_TOKEN,
+          accessToken: credentials.accessToken,
           expected: expectedPreference,
         });
       } catch (error) {
