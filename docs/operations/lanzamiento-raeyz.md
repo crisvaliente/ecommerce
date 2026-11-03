@@ -9,7 +9,7 @@ Marcá cada ítem cuando esté hecho y verificado.
 ### Infraestructura
 
 - [x] ~~Supabase en plan pago (Pro).~~ Decisión del 2026-11-02: se sigue con el plan gratuito. Los huecos (pausa por inactividad, sin backups gestionados) se cubren con `docs/operations/respaldo-y-continuidad.md`.
-- [ ] **Restauración verificada del backup.** Requisito antes de migraciones sobre datos sensibles. Hoy el backup del 02/11 es íntegro y completo, pero la restauración completa se corta en `storage.buckets_vectors`. Ver `respaldo-y-continuidad.md`, punto 2.
+- [x] **Procedimiento de restauración verificado** (2026-11-02): el backup del 02/11 se restauró completo en un stack aislado y coincide con producción. Ver `respaldo-y-continuidad.md`, punto 2. Se repite con un backup fresco antes de cada migración sobre datos sensibles.
 - [ ] **Chequeo semanal** (estado del proyecto, backup, límites del plan) en marcha desde la apertura de la tienda.
 - [ ] **Webhook de Mercado Pago.** Cloudflare Access también bloquea `/api/webhooks/mercadopago`, así que hoy ningún pago real se consolidaría. Al abrir la tienda: sacar Access, o dejarlo y agregar una excepción para esa ruta.
   *Dónde:* Cloudflare → Zero Trust → Access → Applications.
