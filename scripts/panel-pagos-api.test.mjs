@@ -208,3 +208,11 @@ test("a read error answers 500 internal_error", async (t) => {
     });
   }
 });
+
+test("the payments page renders accented copy, never JavaScript escapes in JSX text", async () => {
+  const page = await readFile(new URL("../src/pages/panel/payments.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(page, /\\u[0-9a-fA-F]{4}/);
+  for (const copy of ["No se encontró información de empresa asociada.", "Reintentá más tarde.", "Desde acá vas a ver el estado de la integración"]) {
+    assert.ok(page.includes(copy), copy);
+  }
+});

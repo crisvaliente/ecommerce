@@ -61,7 +61,7 @@ function PagosStatusCard({ status }: { status: PagosStatus }) {
   if (status === "error") {
     return (
       <p className="mt-2 text-sm text-rose-600">
-        No pudimos cargar el estado de pagos. Reintent\u00e1 m\u00e1s tarde.
+        No pudimos cargar el estado de pagos. Reintentá más tarde.
       </p>
     );
   }
@@ -105,7 +105,7 @@ const PaymentsPage: React.FC = () => {
           </h1>
 
           <p className="text-sm text-slate-500 mt-2 max-w-lg">
-            Desde ac\u00e1 vas a ver el estado de la integraci\u00f3n con MercadoPago de tu
+            Desde acá vas a ver el estado de la integración con MercadoPago de tu
             tienda.
           </p>
         </header>
@@ -124,7 +124,7 @@ const PaymentsPage: React.FC = () => {
             </p>
           ) : (
             <p className="mt-1 text-sm text-slate-400">
-              No se encontr\u00f3 informaci\u00f3n de empresa asociada.
+              No se encontró información de empresa asociada.
             </p>
           )}
         </section>
