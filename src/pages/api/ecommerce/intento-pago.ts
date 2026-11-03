@@ -269,8 +269,8 @@ export default async function handler(
   });
 
   if (credentials.ok === false) {
+    res.setHeader("Cache-Control", "no-store");
     if (credentials.status === 503) {
-      res.setHeader("Cache-Control", "no-store");
       console.error("[intento-pago] credentials_unavailable", {
         empresa_id: store.empresaId,
         reason: credentials.reason,
@@ -526,6 +526,21 @@ export default async function handler(
         return res.status(409).json({ error: "mercadopago_preference_conflict" });
       }
       intento = normalized as IntentoPreferenceRow;
+    }
+    // Attempts created before per-store credentials carry no account; record
+    // the store's account so later notifications can be matched to it.
+    if (intento.mp_user_id === null) {
+      const { data: stamped, error } = await serviceClient
+        .from("intento_pago")
+        .update({ mp_user_id: credentials.mpUserId })
+        .eq("id", row.intento_pago_id)
+        .is("mp_user_id", null)
+        .select(PREFERENCE_SELECT)
+        .maybeSingle();
+      if (error || !stamped?.id) {
+        return res.status(409).json({ error: "mercadopago_preference_conflict" });
+      }
+      intento = stamped as IntentoPreferenceRow;
     }
   } else if (mode === "recover") {
     try {

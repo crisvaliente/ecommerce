@@ -420,6 +420,7 @@ test("P1/P2: a store without credentials answers 409 before the RPC and before M
     credentialRows: { [STORE_A.empresaId]: DEFAULT_CREDENTIAL_ROWS[STORE_A.empresaId] },
   });
   assert.deepEqual({ status: result.status, body: result.body }, { status: 409, body: { error: "pagos_no_configurados" } });
+  assert.equal(result.headers["Cache-Control"], "no-store");
   assert.deepEqual(result.calls.rpc, []);
   assert.deepEqual(result.calls.preferences, []);
 });
@@ -431,6 +432,7 @@ test("P1/P2: an inactive store answers 409 before the RPC", async () => {
     credentialRows: { [STORE_B.empresaId]: { ...DEFAULT_CREDENTIAL_ROWS[STORE_B.empresaId], estado: "inactivo" } },
   });
   assert.deepEqual({ status: result.status, body: result.body }, { status: 409, body: { error: "pagos_no_configurados" } });
+  assert.equal(result.headers["Cache-Control"], "no-store");
   assert.deepEqual(result.calls.rpc, []);
 });
 
@@ -463,6 +465,26 @@ test("P3: an attempt already stamped for a different store conflicts without cal
   assert.deepEqual(result.calls.reconcileCalls, []);
 });
 
+test("P3: recover and reconcile also refuse an attempt stamped by another account", async (t) => {
+  for (const [mode, overrides] of [
+    ["recover", { preference_id: PREFERENCE.id, preference_init_point: null, preference_creation_state: "creating" }],
+    ["reconcile", { preference_creation_state: "ambiguous" }],
+  ]) {
+    await t.test(mode, async () => {
+      const result = await startPayment({
+        requestOptions: { host: STORE_A.hostname },
+        orderStore: STORE_A,
+        initialIntento: freshIntento({ ...overrides, mp_user_id: STORE_B.mpUserId }),
+      });
+      assert.deepEqual({ status: result.status, body: result.body }, { status: 409, body: { error: "mercadopago_preference_conflict" } });
+      assert.deepEqual(result.calls.preferences, []);
+      assert.deepEqual(result.calls.recoverCalls, []);
+      assert.deepEqual(result.calls.reconcileCalls, []);
+      assert.equal(result.calls.intentoUpdates.some((update) => "mp_user_id" in update), false);
+    });
+  }
+});
+
 test("P3: a null mp_user_id is accepted and gets stamped on reuse", async () => {
   const result = await startPayment({
     requestOptions: { host: STORE_A.hostname },
@@ -476,6 +498,7 @@ test("P3: a null mp_user_id is accepted and gets stamped on reuse", async () => 
   });
   assert.equal(result.status, 201);
   assert.deepEqual(result.calls.preferences, []);
+  assert.deepEqual(result.calls.intentoUpdates.filter((update) => "mp_user_id" in update), [{ mp_user_id: STORE_A.mpUserId }]);
 });
 
 test("P4: notification_url stays on the shared platform webhook route", async () => {
