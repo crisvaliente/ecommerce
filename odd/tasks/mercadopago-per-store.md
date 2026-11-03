@@ -57,14 +57,14 @@ Controls: RLS enabled and forced, no policies; `revoke all` from `public`, `anon
 
 `webhook_recepcion_mp` gains `empresa_id uuid null`, filled by the per-store route, so every receipt is attributable to a store.
 
-### Encryption (decision D6-a, recommended: public-key sealing)
+### Encryption (D6-a: public-key sealing)
 
 - The platform holds a key pair per `key_version`. The **private** key lives only in Vercel *Production* (`MP_CREDENTIALS_PRIVATE_KEY`); the **public** key is in the repository or the operator runbook.
 - Sealing: ephemeral X25519 + HKDF-SHA256 + AES-256-GCM (Node `crypto`, no new dependency). The ciphertext binds `empresa_id`, the field name and `key_version` as associated data, so a ciphertext copied to another store or another field fails to decrypt.
 - Consequences: the operator's laptop never holds a key that can decrypt; the database, a dump or a leaked service-role key reveal only ciphertexts; previews and development cannot decrypt (no private key there) and fail closed.
-- Alternative (simpler, weaker): one symmetric AES-256-GCM key in Production, used both to encrypt (operator) and decrypt (server); the operator would need the key.
+- Discarded alternative (D6-a): one symmetric AES-256-GCM key, which the operator would also need.
 
-### Operator loading (no panel UI in this gate, D6-c)
+### Operator loading (no credential form in the panel, D6-c)
 
 Command `mp:credentials set --empresa <id> --live|--test`, run from the operator's machine:
 
@@ -111,7 +111,7 @@ Dev bypass and lookup fallback stay disabled in production (already so).
 2. **Load Raeyz credentials** with the operator command, from the same account the env token belongs to (`mp_user_id` must match the account of today's token).
 3. **Deploy the new code.** New preferences use the per-store route and stamp `mp_user_id`.
 4. **Legacy route** `POST /api/webhooks/mercadopago` stays, pinned explicitly to the Raeyz row (not "a default store"): it verifies with Raeyz's secret, fetches with Raeyz's token, and accepts `mp_user_id null` attempts only for Raeyz. This covers preferences created before step 3 and their late notifications (retries, refunds, chargebacks).
-5. **Sunset (D6-b, recommended 30 days without legacy-route traffic):** remove `MERCADOPAGO_ACCESS_TOKEN` and `MERCADOPAGO_WEBHOOK_SECRET` from Vercel, then remove the legacy route in a later commit.
+5. **Sunset (D6-b: 30 days without legacy-route traffic):** remove `MERCADOPAGO_ACCESS_TOKEN` and `MERCADOPAGO_WEBHOOK_SECRET` from Vercel, then remove the legacy route in a later commit.
 6. **Rollback:** until step 5, reverting the code returns to the env credentials; the new table is ignored.
 
 Payments in flight today: none (0 unexpired pending orders, 0 active attempts; orders expire after 1 hour). Even so, step 4 is kept because Mercado Pago can notify long after payment.
@@ -140,7 +140,7 @@ Automated tests (no Mercado Pago needed): seal/open round trip, tampered ciphert
 | Unit | Content | Estimate |
 |---|---|---|
 | G6-1 | Migration (table, columns, grants), sealing module, operator command, tests | ~250 lines |
-| G6-2 | Preferences with the store's token, `409 pagos_no_configurados`, `mp_user_id` stamp, per-store `notification_url`, tests | ~150 lines |
+| G6-2 | Preferences with the store's token, `409 pagos_no_configurados`, `mp_user_id` stamp, per-store `notification_url`; read-only payment status in the panel (D6-c); tests | ~200 lines |
 | G6-3 | Per-store webhook route with the 8-step order, tests (two-store matrix, redaction) | ~250 lines |
 | G6-4 | Legacy route pinned to Raeyz, runbook (load, switch, sunset, rollback), docs | ~150 lines |
 
@@ -154,12 +154,12 @@ Each unit: test-first, independent verification, native review, then the sandbox
 - **Project pause (free plan):** check `supabase projects list` before every production step of this gate and before the sandbox-to-production switch; a paused project stops the webhook.
 - **FG Herramientas:** a business Mercado Pago account and its own application (questionnaire item 11).
 
-## Open decisions
+## Decisions (user, 2026-11-02)
 
-- **D6-a** — Encryption scheme: public-key sealing (recommended) or one symmetric key.
-- **D6-b** — Legacy route sunset: 30 days without traffic (recommended) or a fixed date.
-- **D6-c** — Panel: read-only "pagos configurados / no configurados" for store admins now, credential form later.
-- **D6-d** — Each store owns its Mercado Pago application (recommended) vs the operator creating it on the store's behalf.
+- **D6-a** — Encryption: **public-key sealing** (X25519 + HKDF-SHA256 + AES-256-GCM, associated data bound to store, field and key version). The symmetric alternative is discarded.
+- **D6-b** — Legacy route sunset: **30 days without legacy-route traffic**, then remove the env credentials, then the route.
+- **D6-c** — Panel: **read-only payment status** for store administrators. A panel API (capability `payments.access`, company from the canonical principal) returns only `{ configurado, live_mode, estado }` for the administrator's own company; never tokens, secrets, ciphertext, `mp_user_id` or `webhook_key`. No credential form in this gate.
+- **D6-d** — **Each store owns its Mercado Pago application** in its own account and hands the token and webhook secret to the operator through the loading command; the operator never signs in to a store's Mercado Pago account.
 
 ## Log
 
@@ -168,3 +168,4 @@ Each unit: test-first, independent verification, native review, then the sandbox
 - **L3** (correction): an earlier session note said the webhook lookup fallback was not restricted to non-production; `index.ts:128-130` shows it is (`NODE_ENV !== "production"`).
 - **L4** (user, 2026-11-02): paused for usage limits after ADR 0003 (`ea8c111`); resumed with "retoma laburo".
 - **L5** (user, 2026-11-02): "Decisión: no vamos a contratar Supabase Pro. Continuamos con el plan gratuito." … "Mantenemos la restauración verificable como requisito antes de migraciones de datos sensibles." Dependencies updated; backup/restore/continuity strategy in `docs/operations/respaldo-y-continuidad.md`.
+- **L6** (user, 2026-11-02): D6-a "Clave pública (recomendado)"; D6-b "A los 30 días sin tráfico (recomendado)"; D6-c "Sí, solo lectura (recomendado)"; D6-d "Cada comercio, en su cuenta (recomendado)". Implementation still not authorized.
