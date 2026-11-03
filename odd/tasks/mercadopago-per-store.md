@@ -131,6 +131,7 @@ Setup: two Mercado Pago **test sellers** (Uruguay) with their own applications a
 | Payment whose `collector_id` differs from the store | absorbed, no change |
 | `external_reference` of a B attempt arriving on A's route | absorbed, no change |
 | Duplicate delivery | absorbed by the existing guards |
+| Payment of the same account without our `external_reference` (in-store sale with the Mercado Pago Point device) | absorbed as `payment_without_external_reference`, no change (behavior already in today's handler) |
 | Legacy route with a pre-switch Raeyz preference | processed with Raeyz's credentials |
 
 Automated tests (no Mercado Pago needed): seal/open round trip, tampered ciphertext, wrong associated data, missing key → fail closed; two-store handler matrix for preferences and webhook with mocked Mercado Pago; table grants and RLS on the local database; log redaction.
@@ -152,7 +153,7 @@ Each unit: test-first, independent verification, native review, then the sandbox
 - **ADR 0002 / platform-domain gate:** the webhook base is `APP_BASE_URL`; this gate does not depend on buying the platform domain (per-store credentials need no OAuth redirect URI). When the platform moves, each store's Mercado Pago application must get the new webhook URL; the runbook covers it.
 - **Verified restore (required, free plan):** no Supabase Pro (user decision 2026-11-02). Before G6-1 reaches production (it creates the credentials table and alters `intento_pago`) there must be a fresh backup that was restored successfully on an isolated local stack, per `docs/operations/respaldo-y-continuidad.md`. The procedure was verified on 2026-11-02 (full restore of the 02/11 backup matches production, including `auth.users` trigger and `storage` policies); it is repeated with a fresh backup before G6-1.
 - **Project pause (free plan):** check `supabase projects list` before every production step of this gate and before the sandbox-to-production switch; a paused project stops the webhook.
-- **FG Herramientas:** a business Mercado Pago account and its own application (questionnaire item 11).
+- **FG Herramientas:** already has an active Mercado Pago account used with the Point device in the store (user, 2026-11-02). Online sales use the same account; pending: confirm it is a business account (RUT, invoicing), who creates the application in that account (D6-d), and how online stock follows in-store sales (questionnaire item 8): Point sales do not update the online stock.
 
 ## Decisions (user, 2026-11-02)
 
@@ -169,3 +170,4 @@ Each unit: test-first, independent verification, native review, then the sandbox
 - **L4** (user, 2026-11-02): paused for usage limits after ADR 0003 (`ea8c111`); resumed with "retoma laburo".
 - **L5** (user, 2026-11-02): "Decisión: no vamos a contratar Supabase Pro. Continuamos con el plan gratuito." … "Mantenemos la restauración verificable como requisito antes de migraciones de datos sensibles." Dependencies updated; backup/restore/continuity strategy in `docs/operations/respaldo-y-continuidad.md`.
 - **L6** (user, 2026-11-02): D6-a "Clave pública (recomendado)"; D6-b "A los 30 días sin tráfico (recomendado)"; D6-c "Sí, solo lectura (recomendado)"; D6-d "Cada comercio, en su cuenta (recomendado)". Implementation still not authorized.
+- **L7** (user, 2026-11-02): "ellos tienen su propia cuenta de mercado pago hasta con pos" … "pos de mercadopago el amarillo" (Mercado Pago Point).
